@@ -1,0 +1,3789 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Hedgerow Hours — A Bird Watching Game</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#3a2b1a;
+    --parchment:#e9dcb8;
+    --parchment-dark:#d8c496;
+    --leather:#5b3a29;
+    --leather-dark:#3f2718;
+    --brass:#c8a24a;
+    --common:#6fae52;
+    --uncommon:#3f8fd9;
+    --rare:#9b5ec9;
+    --extraordinary:#e2a233;
+    --seasonal:#e0527a;
+    --panel-shadow: 0 8px 0 rgba(0,0,0,0.35);
+    /* UI margins scale with viewport: small screens push buttons out to the true
+       corners to save central space; large screens pull them in a bit so they
+       don't feel stranded far from the action. */
+    --edge-x: clamp(8px, 3vw, 46px);
+    --edge-y: clamp(8px, 3vh, 34px);
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    margin:0; padding:0; width:100%; height:100%; overflow:hidden;
+    background:#0b1330;
+    font-family:'VT323', monospace;
+    -webkit-user-select:none; user-select:none;
+  }
+  #gameWrap{ position:relative; width:100vw; height:100vh; }
+  canvas{ display:block; image-rendering:pixelated; image-rendering:crisp-edges; }
+  #world{ position:absolute; top:0; left:0; cursor:crosshair; }
+  #world.binocMode{ cursor:none; }
+
+  /* scanline / vignette overlay for retro feel */
+  #overlayFx{
+    position:absolute; inset:0; pointer-events:none;
+    background:
+      repeating-linear-gradient(rgba(0,0,0,0) 0px, rgba(0,0,0,0) 2px, rgba(0,0,0,0.05) 3px, rgba(0,0,0,0) 4px),
+      radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(0,0,0,0.35) 100%);
+    mix-blend-mode:multiply;
+  }
+  #flashFx{
+    position:absolute; inset:0; pointer-events:none;
+    background:#fff; opacity:0; z-index:15;
+  }
+  #flashFx.flash{ animation:cameraFlash .35s ease-out; }
+  @keyframes cameraFlash{ 0%{opacity:0.9;} 100%{opacity:0;} }
+
+  .pixelFont{ font-family:'Press Start 2P', monospace; }
+
+  #hud{
+    position:absolute; top:var(--edge-y); left:var(--edge-x); z-index:5;
+    display:flex; flex-direction:column; gap:6px;
+    pointer-events:none;
+  }
+  #hud .badge{
+    pointer-events:auto;
+    background:rgba(20,14,8,0.55);
+    border:2px solid var(--brass);
+    color:var(--parchment);
+    padding:8px 12px;
+    font-size:14px;
+    letter-spacing:1px;
+    box-shadow:var(--panel-shadow);
+  }
+  #hud .badge b{ color:var(--brass); }
+
+  #biomeBar{
+    position:absolute; top:var(--edge-y); left:50%; transform:translateX(-50%); z-index:6;
+    display:flex; gap:8px;
+  }
+  .smallBtn{ width:44px; height:44px; font-size:20px; }
+  .smallBtn.active{ background:var(--brass); color:var(--leather-dark); }
+
+  #hint{
+    position:absolute; bottom:var(--edge-y); left:var(--edge-x); z-index:5;
+    color:rgba(233,220,184,0.85);
+    background:rgba(20,14,8,0.5);
+    border:2px solid rgba(200,162,74,0.6);
+    padding:6px 10px;
+    font-size:14px;
+    max-width:340px;
+    line-height:1.35;
+  }
+
+  #controls{
+    position:absolute; bottom:var(--edge-y); right:var(--edge-x); z-index:6;
+    display:flex; gap:12px;
+  }
+  .iconBtn{
+    width:58px; height:58px;
+    background:var(--leather);
+    border:3px solid var(--brass);
+    color:var(--parchment);
+    font-size:26px;
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer;
+    box-shadow:var(--panel-shadow);
+    position:relative;
+    transition:transform .08s ease;
+  }
+  .iconBtn:active{ transform:translateY(3px); box-shadow:0 4px 0 rgba(0,0,0,0.35); }
+  .iconBtn.active{ background:var(--brass); color:var(--leather-dark); }
+  .iconBtn .count{
+    position:absolute; bottom:-8px; right:-8px;
+    background:var(--extraordinary);
+    color:#2a1a08;
+    font-family:'Press Start 2P',monospace;
+    font-size:9px;
+    padding:3px 4px;
+    border:2px solid var(--leather-dark);
+  }
+
+  /* Journal */
+  #journalOverlay{
+    position:absolute; inset:0; z-index:20;
+    background:rgba(6,4,2,0.55);
+    display:none;
+    align-items:center; justify-content:center;
+  }
+  #journalOverlay.open{ display:flex; }
+  #journal{
+    width:min(920px, 92vw); height:min(640px, 88vh);
+    background:
+      linear-gradient(180deg, var(--parchment), var(--parchment-dark));
+    border:6px solid var(--leather);
+    outline:2px solid var(--brass);
+    box-shadow:0 20px 50px rgba(0,0,0,0.6);
+    display:flex; flex-direction:column;
+    position:relative;
+  }
+  #journalHead{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:14px 20px;
+    border-bottom:3px double var(--leather);
+    background:rgba(91,58,41,0.08);
+  }
+  #journalHead h1{
+    margin:0; font-family:'Press Start 2P',monospace;
+    font-size:15px; color:var(--ink);
+  }
+  #journalHead .sub{ font-size:16px; color:#6b573a; margin-top:4px; }
+  #closeJournal{
+    background:var(--leather); color:var(--parchment); border:2px solid var(--brass);
+    font-family:'Press Start 2P',monospace; font-size:11px;
+    padding:8px 10px; cursor:pointer;
+  }
+  #tabs{ display:flex; gap:0; padding:0 20px; border-bottom:2px solid var(--leather); }
+  .tabBtn{
+    font-family:'Press Start 2P',monospace; font-size:10px;
+    padding:10px 14px; cursor:pointer; color:#6b573a;
+    background:transparent; border:none; border-bottom:4px solid transparent;
+  }
+  .tabBtn.active{ color:var(--ink); border-bottom-color:var(--brass); }
+  #journalBody{
+    flex:1; overflow-y:auto; padding:16px 20px 24px;
+    display:grid; grid-template-columns:repeat(auto-fill, minmax(240px,1fr)); gap:14px;
+    align-content:start;
+  }
+  #journalBody::-webkit-scrollbar{ width:10px; }
+  #journalBody::-webkit-scrollbar-thumb{ background:var(--leather); }
+  .entry{
+    display:flex; gap:10px;
+    background:rgba(255,255,255,0.28);
+    border:2px solid rgba(91,58,41,0.35);
+    padding:8px;
+  }
+  .entry .art{
+    width:64px; height:64px; flex:none;
+    image-rendering:pixelated;
+    background:rgba(0,0,0,0.06);
+    border:2px solid rgba(91,58,41,0.35);
+  }
+  .entry .info{ display:flex; flex-direction:column; min-width:0; }
+  .entry .nameRow{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .entry .name{ font-family:'Press Start 2P',monospace; font-size:10px; color:var(--ink); }
+  .entry .tier{
+    font-family:'Press Start 2P',monospace; font-size:8px;
+    padding:3px 5px; color:#fff;
+  }
+  .entry .fact{ font-size:15px; color:#4a3a26; margin-top:4px; line-height:1.25; }
+  .entry.locked{ opacity:0.55; }
+  .entry.locked .name{ color:#8a7a5c; }
+  .entry.locked .fact{ color:#8a7a5c; font-style:italic; }
+  .tier.common{ background:var(--common); }
+  .tier.uncommon{ background:var(--uncommon); }
+  .tier.rare{ background:var(--rare); }
+  .tier.extraordinary{ background:var(--extraordinary); color:#2a1a08; }
+  .tier.seasonal{ background:var(--seasonal); }
+
+  /* Photo Album */
+  #photoOverlay{
+    position:absolute; inset:0; z-index:20;
+    background:rgba(6,4,2,0.55);
+    display:none;
+    align-items:center; justify-content:center;
+  }
+  #photoOverlay.open{ display:flex; }
+  #photoAlbum{
+    width:min(920px, 92vw); height:min(640px, 88vh);
+    background:linear-gradient(180deg, var(--parchment), var(--parchment-dark));
+    border:6px solid var(--leather);
+    outline:2px solid var(--brass);
+    box-shadow:0 20px 50px rgba(0,0,0,0.6);
+    display:flex; flex-direction:column;
+    position:relative;
+  }
+  #photoBody{
+    flex:1; overflow-y:auto; padding:18px 20px 24px;
+    display:grid; grid-template-columns:repeat(auto-fill, minmax(160px,1fr)); gap:14px;
+    align-content:start;
+  }
+  #photoBody::-webkit-scrollbar{ width:10px; }
+  #photoBody::-webkit-scrollbar-thumb{ background:var(--leather); }
+  #photoBody .empty{
+    grid-column:1/-1; text-align:center; color:#8a7a5c; font-size:18px; padding:40px 10px;
+  }
+  .photoCard{
+    position:relative;
+    background:rgba(255,255,255,0.28);
+    border:2px solid rgba(91,58,41,0.35);
+    padding:8px; display:flex; flex-direction:column; align-items:center; gap:6px;
+  }
+  .photoCard img{
+    width:100%; aspect-ratio:1/1; border-radius:50%;
+    border:3px solid var(--leather); image-rendering:pixelated;
+    background:#000;
+  }
+  .photoCard .when{ font-size:14px; color:#6b573a; }
+  .photoCard .delBtn{
+    position:absolute; top:4px; right:4px;
+    width:22px; height:22px; font-size:12px; line-height:1;
+    background:#8a2f2f; color:#fff; border:2px solid var(--leather-dark);
+    cursor:pointer; display:flex; align-items:center; justify-content:center;
+  }
+
+  /* Settings */
+  #settingsOverlay{
+    position:absolute; inset:0; z-index:25;
+    background:rgba(6,4,2,0.6);
+    display:none; align-items:center; justify-content:center;
+  }
+  #settingsOverlay.open{ display:flex; }
+  #settingsPanel{
+    width:min(720px, 92vw); max-height:88vh;
+    background:linear-gradient(180deg, var(--parchment), var(--parchment-dark));
+    border:6px solid var(--leather);
+    outline:2px solid var(--brass);
+    box-shadow:0 20px 50px rgba(0,0,0,0.6);
+    display:flex; flex-direction:column;
+    overflow:hidden;
+  }
+  #settingsBody{
+    padding:16px 22px 24px; overflow-y:auto; display:flex; flex-direction:column; gap:14px;
+  }
+  #settingsBody::-webkit-scrollbar{ width:10px; }
+  #settingsBody::-webkit-scrollbar-thumb{ background:var(--leather); }
+  .settingRow{
+    display:flex; gap:14px; align-items:flex-start; cursor:pointer;
+    background:rgba(255,255,255,0.28);
+    border:2px solid rgba(91,58,41,0.35);
+    padding:12px 14px;
+  }
+  .settingRow .checkbox{
+    flex:none; width:30px; height:30px;
+    border:3px solid var(--leather); background:#fff;
+    display:flex; align-items:center; justify-content:center;
+    font-size:18px; font-weight:bold; color:#8a2f2f;
+  }
+  .settingRow .checkbox::before{ content:'✕'; }
+  .settingRow.checked .checkbox{ background:#dff0d8; color:#2f7a3a; }
+  .settingRow.checked .checkbox::before{ content:'✓'; }
+  .settingText{ display:flex; flex-direction:column; gap:4px; min-width:0; }
+  .settingTitle{ font-size:12px; color:var(--ink); }
+  .settingDesc{ font-size:16px; color:#4a3a26; line-height:1.35; }
+  .micMeterWrap{ display:flex; align-items:center; gap:8px; margin-top:4px; }
+  .micMeterBar{ width:160px; height:12px; background:#00000022; border:2px solid var(--leather); display:block; }
+  .micMeterFill{ display:block; height:100%; width:0%; background:#3fa07a; transition:width .08s linear, background .15s linear; }
+  .micMeterLabel{ font-size:14px; color:#6b573a; }
+
+  #activeWarning{
+    position:absolute; top:calc(var(--edge-y) + 56px); left:50%; transform:translateX(-50%);
+    z-index:8; display:none;
+    background:#8a2f2f; color:#fff; border:3px solid #2a1c10;
+    padding:10px 16px; font-size:12px; box-shadow:var(--panel-shadow);
+    animation: drowsyPulse 0.6s ease-in-out infinite;
+  }
+  #activeWarning.show{ display:block; }
+  @keyframes drowsyPulse{ 0%,100%{ transform:translateX(-50%) scale(1); } 50%{ transform:translateX(-50%) scale(1.05); } }
+
+  /* Toast */
+  #toastWrap{
+    position:absolute; top:16px; left:50%; transform:translateX(-50%);
+    z-index:10; display:flex; flex-direction:column; align-items:center; gap:8px;
+    pointer-events:none;
+  }
+  .toast{
+    font-family:'Press Start 2P',monospace; font-size:11px;
+    background:rgba(20,14,8,0.85); color:var(--parchment);
+    border:2px solid var(--brass);
+    padding:10px 16px;
+    box-shadow:var(--panel-shadow);
+    animation:toastIn .35s ease, toastOut .5s ease 2.2s forwards;
+  }
+  @keyframes toastIn{ from{ opacity:0; transform:translateY(-14px);} to{opacity:1; transform:translateY(0);} }
+  @keyframes toastOut{ to{ opacity:0; transform:translateY(-10px);} }
+
+  #titleScreen{
+    position:absolute; inset:0; z-index:30;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    background:radial-gradient(ellipse at center, #1c2c55 0%, #0a0f24 100%);
+    color:var(--parchment); text-align:center; padding:20px;
+  }
+  #titleScreen h1{ font-family:'Press Start 2P',monospace; font-size:clamp(18px,4vw,34px); color:var(--brass); text-shadow:3px 3px 0 #1a1206; margin-bottom:10px;}
+  #titleScreen p{ font-size:19px; max-width:520px; line-height:1.5; color:#d8cba5; }
+  #startBtn{
+    margin-top:26px; font-family:'Press Start 2P',monospace; font-size:14px;
+    background:var(--leather); color:var(--parchment); border:3px solid var(--brass);
+    padding:14px 26px; cursor:pointer; box-shadow:var(--panel-shadow);
+  }
+  #startBtn:active{ transform:translateY(3px); box-shadow:0 4px 0 rgba(0,0,0,0.35); }
+
+  #adminBtn{
+    margin-top:18px; font-family:'Press Start 2P',monospace; font-size:9px;
+    background:transparent; color:rgba(216,203,165,0.6);
+    border:2px solid rgba(200,162,74,0.35); padding:7px 10px; cursor:pointer;
+  }
+  #adminBtn:hover{ color:var(--parchment); border-color:var(--brass); }
+
+  #adminBar{
+    display:none; position:absolute; bottom:var(--edge-y); left:var(--edge-x); z-index:5;
+    gap:10px; align-items:flex-end;
+  }
+  #summonBtn, #timeBtn{
+    font-size:11px; padding:12px 14px; cursor:pointer;
+    background:var(--leather); color:var(--parchment); border:3px solid var(--brass);
+    box-shadow:var(--panel-shadow);
+  }
+  #summonBtn:active, #timeBtn:active{ transform:translateY(3px); }
+  #timePanel{ width:240px; }
+  .timeRow{ font-size:16px; padding:8px 8px; cursor:pointer; color:var(--ink); }
+  .timeRow:hover{ background:rgba(90,58,24,0.18); }
+  .timeRow.active{ background:rgba(90,58,24,0.3); font-weight:bold; }
+  #summonPanel, #timePanel{
+    display:none; flex-direction:column; gap:8px;
+    position:absolute; left:var(--edge-x); bottom:calc(var(--edge-y) + 58px); z-index:6;
+    width:320px; max-width:90vw; max-height:60vh; padding:10px;
+    background:linear-gradient(180deg, var(--parchment), var(--parchment-dark));
+    border:4px solid var(--leather); outline:2px solid var(--brass);
+    box-shadow:0 16px 40px rgba(0,0,0,0.55);
+  }
+  #summonPanel.open, #timePanel.open{ display:flex; }
+  #summonSearch{ width:100%; font-size:16px; padding:6px 8px; border:3px solid var(--leather); background:#fffaf0; color:var(--ink); }
+  #summonList{ overflow-y:auto; display:flex; flex-direction:column; gap:2px; }
+  .summonRow{ display:flex; align-items:center; gap:8px; padding:3px 4px; cursor:pointer; color:var(--ink); }
+  .summonRow:hover{ background:rgba(90,58,24,0.18); }
+  .summonRow canvas{ width:40px; height:40px; image-rendering:pixelated; flex:none; }
+  .summonName{ font-size:16px; flex:1; }
+  .summonRow .tier{ font-family:'Press Start 2P',monospace; font-size:7px; padding:3px 5px; color:#fff; flex:none; }
+
+  #confirmOverlay{
+    position:absolute; inset:0; z-index:40;
+    background:rgba(6,4,2,0.65);
+    display:none; align-items:center; justify-content:center;
+  }
+  #confirmOverlay.open{ display:flex; }
+  #confirmBox{
+    background:linear-gradient(180deg, var(--parchment), var(--parchment-dark));
+    border:5px solid var(--leather); outline:2px solid var(--brass);
+    box-shadow:0 16px 40px rgba(0,0,0,0.55);
+    padding:26px 30px; max-width:380px; text-align:center;
+  }
+  #confirmMsg{ font-size:12px; line-height:1.7; color:var(--ink); margin:0 0 18px; }
+  #confirmBtns{ display:flex; gap:12px; justify-content:center; }
+  #confirmBtns button{
+    font-size:11px; padding:10px 16px; cursor:pointer;
+    border:3px solid var(--brass); box-shadow:0 5px 0 rgba(0,0,0,0.3);
+  }
+  #confirmBtns button:active{ transform:translateY(3px); box-shadow:0 2px 0 rgba(0,0,0,0.3); }
+  #confirmYes{ background:#8a2f2f; color:var(--parchment); }
+  #confirmNo{ background:var(--leather); color:var(--parchment); }
+</style>
+</head>
+<body>
+<div id="gameWrap">
+  <audio id="bgMusic" src="forest-ambience.mp3" loop preload="auto"></audio>
+  <canvas id="world"></canvas>
+  <div id="overlayFx"></div>
+  <div id="flashFx"></div>
+
+  <button class="iconBtn" id="settingsBtn" title="Settings" style="position:absolute; top:var(--edge-y); right:var(--edge-x); z-index:7;">⚙️</button>
+
+  <div id="hud">
+    <div class="badge pixelFont" id="dayBadge" style="font-size:11px;">DAY</div>
+    <div class="badge" id="countBadge">Birds logged: <b id="countNum">0</b> / <span id="countTotal">32</span></div>
+  </div>
+
+  <div id="biomeBar">
+    <button class="iconBtn smallBtn active" id="biomeForestBtn" title="Forest" data-biome="forest">🌲</button>
+    <button class="iconBtn smallBtn" id="biomeRiverBtn" title="River" data-biome="river">🌊</button>
+    <button class="iconBtn smallBtn" id="biomeFieldBtn" title="Field" data-biome="field">🌾</button>
+    <button class="iconBtn smallBtn" id="biomeRainforestBtn" title="Rainforest" data-biome="rainforest">🌴</button>
+    <button class="iconBtn smallBtn" id="biomeSavannahBtn" title="Savannah" data-biome="savannah">🌵</button>
+    <button class="iconBtn smallBtn" id="biomeMountainsBtn" title="Mountains" data-biome="mountains">🏔️</button>
+    <button class="iconBtn smallBtn" id="biomeCoastBtn" title="Coast" data-biome="coast">🐚</button>
+  </div>
+
+  <div id="hint">Click a bird to log it. Switch biomes above, use binoculars to zoom, and press S to snap a photo while zoomed in.</div>
+  <div id="adminBar">
+    <button id="summonBtn" class="pixelFont">🪶 SUMMON BIRD</button>
+    <button id="timeBtn" class="pixelFont">🕒 TIME</button>
+  </div>
+  <div id="timePanel"></div>
+  <div id="summonPanel">
+    <input type="text" id="summonSearch" placeholder="Search name, tier or biome…" autocomplete="off" spellcheck="false">
+    <div id="summonList"></div>
+  </div>
+
+  <div id="controls">
+    <button class="iconBtn" id="homeBtn" title="Reset &amp; return to menu">🏠</button>
+    <button class="iconBtn" id="binocBtn" title="Binoculars">🔭</button>
+    <button class="iconBtn" id="photoBtn" title="Photo Album (S)">📷<span class="count" id="photoCount">0</span></button>
+    <button class="iconBtn" id="journalBtn" title="Bird Journal">📔<span class="count" id="journalCount">0</span></button>
+  </div>
+
+  <div id="toastWrap"></div>
+
+  <div id="journalOverlay">
+    <div id="journal">
+      <div id="journalHead">
+        <div>
+          <h1>FIELD JOURNAL</h1>
+          <div class="sub" id="journalSub">0 of 32 species recorded</div>
+        </div>
+        <button id="closeJournal" class="pixelFont">CLOSE ✕</button>
+      </div>
+      <div id="tabs">
+        <button class="tabBtn active" data-tier="all">ALL</button>
+        <button class="tabBtn" data-tier="common">COMMON</button>
+        <button class="tabBtn" data-tier="uncommon">UNCOMMON</button>
+        <button class="tabBtn" data-tier="rare">RARE</button>
+        <button class="tabBtn" data-tier="extraordinary">EXTRAORDINARY</button>
+        <button class="tabBtn" data-tier="seasonal">SEASONAL</button>
+      </div>
+      <div id="journalBody"></div>
+    </div>
+  </div>
+
+  <div id="photoOverlay">
+    <div id="photoAlbum">
+      <div id="journalHead">
+        <div>
+          <h1>PHOTO ALBUM</h1>
+          <div class="sub" id="photoSub">0 photos taken</div>
+        </div>
+        <button id="closePhotos" class="pixelFont">CLOSE ✕</button>
+      </div>
+      <div id="photoBody"></div>
+    </div>
+  </div>
+
+  <div id="settingsOverlay">
+    <div id="settingsPanel">
+      <div id="journalHead">
+        <div>
+          <h1>SETTINGS</h1>
+          <div class="sub">Game is paused while this is open</div>
+        </div>
+        <button id="closeSettings" class="pixelFont">CLOSE ✕</button>
+      </div>
+      <div id="settingsBody">
+        <label class="settingRow" data-setting="easy">
+          <span class="checkbox" id="chk-easy"></span>
+          <span class="settingText">
+            <span class="settingTitle pixelFont">EASY MODE</span>
+            <span class="settingDesc">Birds spawn much more frequently.<br>"For the lazy people and people who want short entertainment"</span>
+          </span>
+        </label>
+        <label class="settingRow" data-setting="normal">
+          <span class="checkbox" id="chk-normal"></span>
+          <span class="settingText">
+            <span class="settingTitle pixelFont">NORMAL MODE</span>
+            <span class="settingDesc">Birds spawn the normal amount.<br>"For the average person"</span>
+          </span>
+        </label>
+        <label class="settingRow" data-setting="hard">
+          <span class="checkbox" id="chk-hard"></span>
+          <span class="settingText">
+            <span class="settingTitle pixelFont">HARD MODE</span>
+            <span class="settingDesc">Birds spawn very rarely, even common birds.<br>"For a person looking for a realistic bird watching experience"</span>
+          </span>
+        </label>
+        <label class="settingRow" data-setting="volume">
+          <span class="checkbox" id="chk-volume"></span>
+          <span class="settingText">
+            <span class="settingTitle pixelFont">VOLUME MODE</span>
+            <span class="settingDesc">Uses your microphone — if it's too loud, no birds will spawn.<br>"For a person looking for an even more realistic bird watching experience"</span>
+            <span class="micMeterWrap" id="micMeterWrap" style="display:none;">
+              <span class="micMeterBar"><span class="micMeterFill" id="micMeterFill"></span></span>
+              <span class="micMeterLabel" id="micMeterLabel">listening…</span>
+            </span>
+          </span>
+        </label>
+        <label class="settingRow" data-setting="active">
+          <span class="checkbox" id="chk-active"></span>
+          <span class="settingText">
+            <span class="settingTitle pixelFont">ACTIVE MODE</span>
+            <span class="settingDesc">Click at least every 10 seconds or you'll fall asleep and lose all progress.<br>"For the people who fall asleep easily"</span>
+          </span>
+        </label>
+        <label class="settingRow" data-setting="music">
+          <span class="checkbox" id="chk-music"></span>
+          <span class="settingText">
+            <span class="settingTitle pixelFont">BACKGROUND MUSIC</span>
+            <span class="settingDesc">Turn the background birdsong music on or off.</span>
+          </span>
+        </label>
+        <label class="settingRow adminRow" data-setting="adminSpawn" style="display:none;">
+          <span class="checkbox"></span>
+          <span class="settingText">
+            <span class="settingTitle pixelFont">TOGGLE BIRD SPAWNING</span>
+            <span class="settingDesc">Creative Mode: turn natural bird spawning on or off (summoned birds still work).</span>
+          </span>
+        </label>
+        <label class="settingRow adminRow" data-setting="adminSave" style="display:none;">
+          <span class="checkbox"></span>
+          <span class="settingText">
+            <span class="settingTitle pixelFont">TOGGLE SPAWN SAVING</span>
+            <span class="settingDesc">Creative Mode: when on, clicking a summoned bird logs it like a normal bird.</span>
+          </span>
+        </label>
+        <label class="settingRow adminRow" data-setting="adminRain" style="display:none;">
+          <span class="checkbox"></span>
+          <span class="settingText">
+            <span class="settingTitle pixelFont">TOGGLE RAIN</span>
+            <span class="settingDesc">Creative Mode: turn rain on or off. It stays that way until you toggle it again.</span>
+          </span>
+        </label>
+        <label class="settingRow adminRow" data-setting="adminFlock" style="display:none;">
+          <span class="checkbox"></span>
+          <span class="settingText">
+            <span class="settingTitle pixelFont">TOGGLE FLOCK SPAWNING</span>
+            <span class="settingDesc">Creative Mode: when on, starlings, skylarks, parakeets and sandgrouse have a 1 in 3 chance of arriving as a group of 3 to 8 (natural and summoned).</span>
+          </span>
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <div id="activeWarning" class="pixelFont">😴 WAKE UP! CLICK NOW — <span id="activeWarningNum">5</span>s</div>
+
+  <div id="titleScreen">
+    <h1>HEDGEROW HOURS</h1>
+    <p>A quiet bird watching game. Wait, watch, and click any bird you spot to record it in your field journal.
+    114 species live across seven biomes — forest, river, field, rainforest, savannah, mountains and coast — some by day, some only after dark, and a few only at certain times of year.
+    Use your binoculars to get a closer look, and press S while zoomed in to snap a photo for your album.</p>
+    <button id="startBtn" class="pixelFont">START WATCHING</button>
+    <button id="adminBtn" title="Start a temporary game with no saving. Your player progress stays safe.">Creative Mode</button>
+  </div>
+
+  <div id="confirmOverlay">
+    <div id="confirmBox">
+      <p id="confirmMsg" class="pixelFont">Reset the game? All logged birds will be cleared.</p>
+      <div id="confirmBtns">
+        <button id="confirmYes" class="pixelFont">RESET</button>
+        <button id="confirmNo" class="pixelFont">CANCEL</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+/* ============================== CANVAS SETUP ============================== */
+const canvas = document.getElementById('world');
+const ctx = canvas.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+let W = 0, H = 0;
+function resize(){
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = W; canvas.height = H;
+}
+function onWindowResize(){
+  const oldW = W, oldH = H;
+  resize();
+  // keep every bird/bug/critter in the same relative spot on the new-size screen
+  // instead of leaving it stranded at its old absolute pixel coordinates
+  if(oldW > 0 && oldH > 0 && (oldW !== W || oldH !== H)){
+    rescaleEntitiesForResize(W/oldW, H/oldH);
+  }
+}
+window.addEventListener('resize', onWindowResize);
+resize();
+
+/* ============================== BIRD SHAPE ARCHETYPES ==============================
+   16x16 logical grid. Each part is a rect {x,y,w,h} in grid units, or an array of rects.
+*/
+const SHAPES = {
+  small: {
+    tail:{x:0,y:6,w:3,h:3},
+    body:{x:3,y:5,w:7,h:6},
+    wing:{x:4,y:6,w:5,h:4},
+    head:{x:9,y:2,w:5,h:5},
+    beak:{x:14,y:4,w:2,h:1},
+    eye:{x:11,y:3,w:1,h:1},
+    legs:[{x:6,y:11,w:1,h:2},{x:8,y:11,w:1,h:2}]
+  },
+  dove:{
+    tail:{x:0,y:6,w:4,h:3},
+    body:{x:3,y:4,w:8,h:7},
+    wing:{x:4,y:6,w:6,h:5},
+    head:{x:10,y:2,w:5,h:5},
+    beak:{x:15,y:4,w:1,h:1},
+    eye:{x:12,y:3,w:1,h:1},
+    legs:[{x:6,y:11,w:1,h:2},{x:9,y:11,w:1,h:2}]
+  },
+  corvid:{
+    tail:{x:0,y:5,w:5,h:2},
+    body:{x:4,y:5,w:7,h:6},
+    wing:{x:5,y:6,w:6,h:4},
+    head:{x:10,y:2,w:5,h:5},
+    beak:{x:15,y:4,w:1,h:1},
+    eye:{x:12,y:3,w:1,h:1},
+    legs:[{x:7,y:11,w:1,h:2},{x:9,y:11,w:1,h:2}]
+  },
+  raptor:{
+    tail:{x:0,y:6,w:4,h:2},
+    body:{x:3,y:4,w:8,h:7},
+    wing:{x:2,y:5,w:10,h:3},
+    head:{x:10,y:2,w:4,h:4},
+    beak:{x:14,y:3,w:2,h:1},
+    eye:{x:11,y:2,w:1,h:1},
+    legs:[{x:6,y:11,w:1,h:2},{x:9,y:11,w:1,h:2}]
+  },
+  owl:{
+    tail:{x:2,y:11,w:4,h:1},
+    body:{x:2,y:3,w:9,h:9},
+    wing:{x:2,y:5,w:9,h:5},
+    head:{x:2,y:0,w:9,h:6},
+    beak:{x:6,y:4,w:2,h:1},
+    eye:[{x:4,y:2,w:2,h:2},{x:8,y:2,w:2,h:2}],
+    legs:[{x:4,y:12,w:1,h:1},{x:7,y:12,w:1,h:1}]
+  },
+  exotic:{
+    tail:{x:0,y:5,w:4,h:2},
+    body:{x:3,y:4,w:8,h:6},
+    wing:{x:4,y:5,w:6,h:4},
+    head:{x:10,y:1,w:5,h:5},
+    beak:{x:15,y:3,w:2,h:1},
+    eye:{x:12,y:2,w:1,h:1},
+    legs:[{x:6,y:10,w:1,h:2},{x:9,y:10,w:1,h:2}],
+    crest:{x:9,y:0,w:1,h:2}
+  },
+  waterfowl:{
+    tail:{x:1,y:7,w:3,h:2},
+    body:{x:3,y:5,w:9,h:6},
+    wing:{x:3,y:6,w:8,h:4},
+    neck:{x:10,y:2,w:2,h:4},
+    head:{x:10,y:0,w:4,h:3},
+    beak:{x:14,y:1,w:2,h:1},
+    eye:{x:12,y:0,w:1,h:1},
+    legs:[{x:6,y:11,w:1,h:2},{x:9,y:11,w:1,h:2}]
+  },
+  wader:{
+    tail:{x:2,y:7,w:3,h:2},
+    body:{x:4,y:6,w:6,h:5},
+    wing:{x:4,y:6,w:6,h:4},
+    neck:{x:9,y:1,w:2,h:6},
+    head:{x:9,y:0,w:4,h:3},
+    beak:{x:13,y:1,w:3,h:1},
+    eye:{x:11,y:0,w:1,h:1},
+    legs:[{x:5,y:11,w:1,h:5},{x:8,y:11,w:1,h:5}]
+  },
+  parrot:{
+    tail:{x:0,y:7,w:6,h:2},
+    body:{x:5,y:4,w:6,h:7},
+    wing:{x:5,y:5,w:5,h:5},
+    head:{x:9,y:2,w:5,h:5},
+    beak:{x:13,y:3,w:3,h:3},
+    eye:{x:11,y:3,w:1,h:1},
+    legs:[{x:7,y:11,w:1,h:2},{x:9,y:11,w:1,h:2}]
+  },
+  toucan:{
+    tail:{x:1,y:7,w:3,h:2},
+    body:{x:3,y:5,w:7,h:6},
+    wing:{x:4,y:6,w:5,h:4},
+    head:{x:9,y:3,w:4,h:4},
+    beak:{x:12,y:3,w:4,h:3},
+    eye:{x:11,y:4,w:1,h:1},
+    legs:[{x:5,y:11,w:1,h:2},{x:8,y:11,w:1,h:2}]
+  },
+  hornbill:{
+    tail:{x:0,y:6,w:4,h:3},
+    body:{x:3,y:4,w:8,h:7},
+    wing:{x:4,y:5,w:7,h:5},
+    head:{x:10,y:2,w:4,h:4},
+    beak:{x:13,y:3,w:3,h:3},
+    eye:{x:11,y:3,w:1,h:1},
+    legs:[{x:6,y:11,w:1,h:2},{x:9,y:11,w:1,h:2}]
+  },
+  trogon:{
+    tail:{x:0,y:7,w:6,h:3},
+    body:{x:5,y:4,w:5,h:7},
+    wing:{x:5,y:5,w:5,h:5},
+    head:{x:9,y:2,w:5,h:5},
+    beak:{x:14,y:4,w:2,h:1},
+    eye:{x:11,y:3,w:1,h:1},
+    legs:[{x:7,y:11,w:1,h:2},{x:9,y:11,w:1,h:2}],
+    crest:{x:9,y:0,w:3,h:2}
+  },
+  hummer:{
+    tail:{x:2,y:8,w:2,h:2},
+    body:{x:4,y:6,w:5,h:4},
+    wing:{x:4,y:4,w:5,h:3},
+    head:{x:9,y:4,w:3,h:3},
+    beak:{x:12,y:5,w:4,h:1},
+    eye:{x:10,y:5,w:1,h:1},
+    legs:[]
+  },
+  potoo:{
+    tail:{x:6,y:11,w:3,h:4},
+    body:{x:4,y:2,w:7,h:10},
+    wing:{x:4,y:4,w:7,h:7},
+    head:{x:3,y:0,w:9,h:5},
+    beak:{x:6,y:4,w:3,h:1},
+    eye:[{x:4,y:1,w:2,h:2},{x:9,y:1,w:2,h:2}],
+    legs:[{x:5,y:12,w:1,h:2},{x:9,y:12,w:1,h:2}]
+  },
+  cassowary:{
+    tail:{x:0,y:5,w:3,h:5},
+    body:{x:2,y:4,w:8,h:6},
+    wing:{x:3,y:5,w:5,h:3},
+    neck:{x:9,y:2,w:2,h:4},
+    head:{x:9,y:1,w:4,h:3},
+    beak:{x:13,y:2,w:3,h:1},
+    eye:{x:11,y:1,w:1,h:1},
+    legs:[{x:5,y:10,w:2,h:6},{x:8,y:10,w:2,h:6}]
+  },
+  roadrunner:{
+    tail:{x:0,y:4,w:5,h:2},
+    body:{x:4,y:5,w:6,h:4},
+    wing:{x:5,y:5,w:4,h:3},
+    head:{x:10,y:3,w:4,h:3},
+    beak:{x:14,y:4,w:2,h:1},
+    eye:{x:11,y:4,w:1,h:1},
+    legs:[{x:6,y:9,w:1,h:7},{x:8,y:9,w:1,h:7}],
+    crest:{x:10,y:1,w:2,h:2}
+  },
+  ostrich:{
+    tail:{x:0,y:4,w:3,h:4},
+    body:{x:2,y:4,w:8,h:6},
+    wing:{x:3,y:5,w:6,h:4},
+    neck:{x:10,y:1,w:2,h:5},
+    head:{x:10,y:0,w:4,h:2},
+    beak:{x:14,y:1,w:2,h:1},
+    eye:{x:12,y:0,w:1,h:1},
+    legs:[{x:5,y:10,w:2,h:6},{x:8,y:10,w:2,h:6}]
+  },
+  burrowowl:{
+    tail:{x:5,y:10,w:3,h:2},
+    body:{x:3,y:4,w:8,h:7},
+    wing:{x:3,y:5,w:8,h:5},
+    head:{x:2,y:1,w:10,h:5},
+    beak:{x:6,y:4,w:2,h:1},
+    eye:[{x:4,y:2,w:2,h:2},{x:8,y:2,w:2,h:2}],
+    legs:[{x:5,y:11,w:1,h:4},{x:8,y:11,w:1,h:4}]
+  },
+  kakapo:{
+    tail:{x:1,y:9,w:3,h:3},
+    body:{x:3,y:4,w:8,h:8},
+    wing:{x:3,y:5,w:6,h:6},
+    head:{x:9,y:2,w:5,h:5},
+    beak:{x:13,y:4,w:3,h:3},
+    eye:{x:11,y:3,w:1,h:1},
+    legs:[{x:6,y:12,w:2,h:3},{x:9,y:12,w:2,h:3}]
+  },
+  gull:{
+    tail:{x:0,y:6,w:3,h:2},
+    body:{x:3,y:5,w:8,h:5},
+    wing:{x:1,y:5,w:10,h:3},
+    head:{x:10,y:3,w:4,h:4},
+    beak:{x:14,y:5,w:2,h:1},
+    eye:{x:12,y:4,w:1,h:1},
+    legs:[{x:6,y:10,w:1,h:3},{x:9,y:10,w:1,h:3}]
+  },
+  penguin:{
+    tail:{x:3,y:12,w:3,h:2},
+    body:{x:4,y:4,w:7,h:9},
+    wing:{x:5,y:6,w:3,h:5},
+    head:{x:6,y:0,w:6,h:5},
+    beak:{x:12,y:2,w:3,h:1},
+    eye:{x:10,y:1,w:1,h:1},
+    legs:[{x:5,y:13,w:2,h:2},{x:8,y:13,w:2,h:2}]
+  }
+};
+
+/* ============================== BIRD DATA (114 species across 7 biomes, plus seasonal visitors) ============================== */
+const TIER_SPEED  = { common:1, uncommon:1.1, rare:1.25, extraordinary:1.45, seasonal:1.45 };
+
+const BIRDS = [
+  // =====================  FOREST  =====================
+  // ---- Common ----
+  bird('Wood Pigeon','common','day','dove', {body:'#9aa9ad',head:'#b7c3c6',wing:'#7f9095',chest:'#d8c9c0',beak:'#3a3a3a',eye:'#2a1a08',tail:'#5f6c70',leg:'#c9527a'}, [{part:'neck',color:'#4fae6b',x:10,y:5,w:2,h:1}], 'A large plump dove often seen bumbling clumsily out of hedgerows.', 48, ['forest']),
+  bird('House Sparrow','common','day','small', {body:'#8a7355',head:'#5c4a35',wing:'#6b5940',chest:'#d9c9a8',beak:'#2a2018',eye:'#1a1208',tail:'#5c4a35',leg:'#c98a4a'}, [], 'Nests in noisy little colonies under roof tiles and eaves.', 38, ['forest']),
+  bird('Blackbird','common','day','small', {body:'#1c1a18',head:'#1c1a18',wing:'#151312',chest:'#2a2725',beak:'#e8971e',eye:'#e8971e',tail:'#151312',leg:'#3a2a18'}, [], 'Males sing rich, melodic songs at dawn and dusk from rooftops.', 42, ['forest']),
+  bird('Robin','common','day','small', {body:'#7a6a52',head:'#8a7a5f',wing:'#6a5a44',chest:'#e2712f',beak:'#3a2a18',eye:'#1a1208',tail:'#5a4a38',leg:'#4a3a28'}, [], 'Fiercely territorial — a robin will sing all night under a streetlamp.', 36, ['forest']),
+  bird('Blue Tit','common','day','small', {body:'#e8de9a',head:'#3fa7d6',wing:'#2f7fb0',chest:'#e8de9a',beak:'#2a2018',eye:'#1a1208',tail:'#2f7fb0',leg:'#4a3a28'}, [{part:'cap',color:'#1c4f6b',x:10,y:2,w:5,h:1}], 'Acrobatic and bold, often hanging upside down on feeders.', 34, ['forest']),
+  bird('Great Tit','common','day','small', {body:'#e8d84a',head:'#1c1a18',wing:'#6fa04a',chest:'#e8d84a',beak:'#2a2018',eye:'#e8d84a',tail:'#4a7a3a',leg:'#3a3a3a'}, [{part:'stripe',color:'#1c1a18',x:6,y:8,w:1,h:3}], 'Has one of the largest and most varied songs of any garden bird.', 38, ['forest']),
+  bird('Starling','common','day','small', {body:'#2a2a3a',head:'#2a2a3a',wing:'#3a3a52',chest:'#3a3a52',beak:'#e8c93a',eye:'#1a1208',tail:'#1c1a2a',leg:'#c98a4a'}, [{part:'shine',color:'#5a8a9a',x:4,y:6,w:3,h:2}], 'Forms huge swirling flocks called murmurations at dusk.', 38, ['forest'], {flock:true}),
+  bird('Magpie','common','day','corvid', {body:'#0e0e10',head:'#0e0e10',wing:'#1c3a52',chest:'#e8e6de',beak:'#1a1a1a',eye:'#1a1a1a',tail:'#1c2a3a',leg:'#1a1a1a'}, [{part:'belly',color:'#e8e6de',x:5,y:8,w:4,h:3}], 'Famously intelligent — one of few birds that can recognise itself in a mirror.', 46, ['forest']),
+  bird('Song Thrush','common','day','small', {body:'#8a6a44',head:'#8a6a44',wing:'#7a5a38',chest:'#e8dcb8',beak:'#3a2a18',eye:'#1a1208',tail:'#5a4530',leg:'#c9a04a'}, [{part:'spots',color:'#5a3a20',x:6,y:8,w:4,h:3}], 'Known for repeating each musical phrase two or three times over.', 36, ['forest']),
+
+  // ---- Uncommon ----
+  bird('Great Spotted Woodpecker','uncommon','day','small', {body:'#1c1a18',head:'#1c1a18',wing:'#e8e6de',chest:'#e8e6de',beak:'#3a2a18',eye:'#1a1208',tail:'#1c1a18',leg:'#3a3a3a'}, [{part:'crown',color:'#c9302f',x:11,y:2,w:2,h:1},{part:'vent',color:'#c9302f',x:3,y:9,w:2,h:1}], 'Drums on tree trunks up to forty times a second to mark territory.', 40, ['forest']),
+  bird('Nuthatch','uncommon','day','small', {body:'#e8b98a',head:'#7f9aa0',wing:'#6a8a90',chest:'#e8b98a',beak:'#3a2a18',eye:'#1a1208',tail:'#5a7a80',leg:'#c9a04a'}, [{part:'stripe',color:'#1c1a18',x:9,y:4,w:5,h:1}], 'The only UK bird that can confidently climb head-first down a tree trunk.', 36, ['forest']),
+  bird('Chaffinch','uncommon','day','small', {body:'#c98a6a',head:'#7a6ac9',wing:'#5a4a38',chest:'#d9a988',beak:'#7a7a7a',eye:'#1a1208',tail:'#3a3a3a',leg:'#8a6a4a'}, [{part:'bar',color:'#e8e6de',x:5,y:8,w:3,h:1}], 'Its cheerful song ends in a distinctive downward flourish.', 34, ['forest']),
+  bird('Goldfinch','uncommon','day','small', {body:'#c9b98a',head:'#c9302f',wing:'#1c1a18',chest:'#e8dcb8',beak:'#c9a04a',eye:'#1a1208',tail:'#1c1a18',leg:'#c9a04a'}, [{part:'wingbar',color:'#e8c93a',x:4,y:7,w:4,h:1}], 'Gathers in flocks called "charms" to feast on thistle seed.', 34, ['forest']),
+  bird('Hawfinch','uncommon','day','small', {body:'#c98a4a',head:'#c9a24a',wing:'#1c1a18',chest:'#d9a988',beak:'#c9c9b8',eye:'#1a1208',tail:'#1c1a18',leg:'#8a6a4a'}, [], 'Its massive bill has the strongest bite force of any European finch.', 38, ['forest']),
+  bird('Green Woodpecker','uncommon','day','small', {body:'#5c8a3a',head:'#c9302f',wing:'#4a7a2a',chest:'#d8d2a8',beak:'#3a2a18',eye:'#e8d84a',tail:'#3a5a2a',leg:'#3a3a3a'}, [], 'Often feeds on the ground, digging out ants with a long sticky tongue.', 40, ['forest','field']),
+
+  // ---- Rare ----
+  bird('Bullfinch','rare','day','small', {body:'#c9425a',head:'#1c1a18',wing:'#4a4a52',chest:'#e0637a',beak:'#2a2018',eye:'#1a1208',tail:'#1c1a18',leg:'#3a3a3a'}, [], 'A shy visitor that quietly strips buds from trees in early spring.', 36, ['forest']),
+  bird('Waxwing','rare','day','small', {body:'#c9a288',head:'#c9a288',wing:'#2a2018',chest:'#d9b99a',beak:'#1a1a1a',eye:'#1a1a1a',tail:'#e8d84a',leg:'#1a1a1a'}, [{part:'crest',color:'#c9a288',x:9,y:0,w:2,h:2},{part:'tip',color:'#c9302f',x:5,y:8,w:2,h:1}], 'Arrives in winter flocks that can strip a berry bush bare in minutes.', 36, ['forest']),
+  bird('Jay','rare','day','corvid', {body:'#d9c2a0',head:'#d9c2a0',wing:'#3f7fc9',chest:'#e8dcc4',beak:'#1a1a1a',eye:'#1a1a1a',tail:'#1c1a18',leg:'#8a6a4a'}, [{part:'moustache',color:'#1c1a18',x:11,y:5,w:1,h:2},{part:'wingpatch',color:'#e8e6de',x:5,y:7,w:2,h:1}], 'Buries thousands of acorns each autumn, quietly planting future oak woods.', 44, ['forest']),
+  bird('Nightjar','rare','night','small', {body:'#5c5240',head:'#5c5240',wing:'#4a4030',chest:'#7a6c54',beak:'#2a2018',eye:'#1a1208',tail:'#3a3226',leg:'#3a2a18'}, [{part:'mottle',color:'#3a3226',x:5,y:7,w:3,h:2}], 'A silent hunter of moths at dusk, known for its eerie churring call.', 38, ['forest']),
+  bird('Little Owl','rare','night','owl', {body:'#8a7a5c',head:'#8a7a5c',wing:'#6a5c44',chest:'#c9b98a',beak:'#c9a04a',eye:'#e8d84a',tail:'#6a5c44',leg:'#c9a04a'}, [{part:'brow',color:'#e8dcb8',x:2,y:0,w:9,h:1}], 'Often seen perched boldly on fence posts, even in broad daylight.', 44, ['forest']),
+  bird('Tawny Owl','rare','night','owl', {body:'#8a6a44',head:'#8a6a44',wing:'#6a5230',chest:'#c9b088',beak:'#c9a04a',eye:'#1a1208',tail:'#6a5230',leg:'#8a6a4a'}, [{part:'facial',color:'#d9c2a0',x:3,y:1,w:7,h:4}], 'Its famous "twit-twoo" is actually two owls calling to each other.', 48, ['forest']),
+  bird('Barn Owl','rare','night','owl', {body:'#e8dcc4','head':'#e8dcc4',wing:'#d9c99a',chest:'#f2ead8',beak:'#c9a04a',eye:'#1a1208',tail:'#d9c99a',leg:'#c9a04a'}, [{part:'face',color:'#ffffff',x:3,y:1,w:7,h:4}], 'Hunts by sound alone, able to catch prey in total darkness.', 46, ['forest']),
+
+  // ---- Extraordinary ----
+  bird('Long-eared Owl','extraordinary','night','owl', {body:'#a08a5f',head:'#a08a5f',wing:'#7a6a44',chest:'#d9c2a0',beak:'#2a2018',eye:'#e8862f',tail:'#7a6a44',leg:'#8a6a4a'}, [{part:'tuft1',color:'#5a4a30',x:3,y:-1,w:1,h:2},{part:'tuft2',color:'#5a4a30',x:9,y:-1,w:1,h:2}], 'Roosts hidden in dense conifers by day; rarely seen despite being widespread.', 46, ['forest']),
+  bird('Bee-eater','extraordinary','day','exotic', {body:'#3fa07a',head:'#e8c93a',wing:'#1f8f6a',chest:'#e07a3f',beak:'#1a1a1a',eye:'#c9302f',tail:'#2a2018',leg:'#8a6a4a'}, [{part:'mask',color:'#1c1a18',x:11,y:2,w:2,h:2},{part:'throat',color:'#e8c93a',x:9,y:5,w:3,h:1}], 'Catches bees and wasps mid-air, rubbing off the sting before eating.', 42, ['forest']),
+
+  // =====================  RIVER  =====================
+  // ---- Common ----
+  bird('Canada Goose','common','day','waterfowl', {body:'#8a7a5c',head:'#2a2a28',wing:'#6a5c44',chest:'#c9b98a',beak:'#2a2018',eye:'#1a1208',tail:'#4a4038',leg:'#2a2018'}, [{part:'chinstrap',color:'#e8e6de',x:10,y:0,w:4,h:1}], 'Travels in noisy V-shaped flocks and grazes on grass near water.', 54, ['river']),
+  bird('Mallard','common','day','waterfowl', {body:'#8a7a68',head:'#2a6a4a',wing:'#6a5c48',chest:'#c9b090',beak:'#e8c93a',eye:'#1a1208',tail:'#3a3226',leg:'#e8862f'}, [{part:'ring',color:'#e8e6de',x:9,y:3,w:2,h:1}], 'Males show off a glossy green head while females stay mottled brown for camouflage.', 44, ['river']),
+  bird('Mute Swan','common','day','waterfowl', {body:'#f2f2ea',head:'#f2f2ea',wing:'#e2e2d8',chest:'#ffffff',beak:'#e8862f',eye:'#1a1208',tail:'#e2e2d8',leg:'#1c1a18'}, [{part:'knob',color:'#1c1a18',x:10,y:1,w:1,h:1}], 'One of the heaviest flying birds, and famous for mating for life.', 60, ['river']),
+  bird('Moorhen','common','day','small', {body:'#2a2a28',head:'#2a2a28',wing:'#1c1a18',chest:'#3a3a38',beak:'#c9302f',eye:'#c9302f',tail:'#1c1a18',leg:'#e8c93a'}, [{part:'billtip',color:'#e8d84a',x:14,y:4,w:1,h:1},{part:'flank',color:'#e8e6de',x:3,y:9,w:1,h:2}], 'Flicks its tail nervously while swimming, flashing white feathers underneath.', 36, ['river']),
+
+  // ---- Uncommon ----
+  bird('Grey Heron','uncommon','day','wader', {body:'#8a96a0',head:'#e8e6de',wing:'#6a7680',chest:'#e8e6de',beak:'#e8862f',eye:'#e8c93a',tail:'#5a6670',leg:'#3a3a3a'}, [{part:'stripe',color:'#1c1a18',x:9,y:0,w:1,h:3}], 'Stands motionless for long periods before striking at fish with lightning speed.', 58, ['river']),
+  bird('Cormorant','uncommon','day','waterfowl', {body:'#1c2a2a',head:'#1c2a2a',wing:'#101c1c',chest:'#2a3a3a',beak:'#3a2a18',eye:'#3fa07a',tail:'#101c1c',leg:'#1c1a18'}, [], 'Often seen perched with wings held open to dry them after diving.', 46, ['river','coast']),
+  bird('Kingfisher','uncommon','day','small', {body:'#1f9fb0',head:'#1f9fb0',wing:'#0f7f90',chest:'#e07a3f',beak:'#1a1a1a',eye:'#1a1a1a',tail:'#0f6f7f',leg:'#c9425a'}, [], 'Dives headfirst into water at speed to snatch small fish.', 34, ['river']),
+
+  // ---- Extraordinary ----
+  bird('Osprey','extraordinary','day','raptor', {body:'#5a5248',head:'#e8e6de',wing:'#3a342c',chest:'#e8e6de',beak:'#2a2018',eye:'#e8c93a',tail:'#3a342c',leg:'#c9a04a'}, [{part:'eyestripe',color:'#1c1a18',x:10,y:3,w:4,h:1}], 'Dives feet-first into water and can lift a fish nearly its own body weight.', 54, ['river']),
+
+  // =====================  FIELD  =====================
+  // ---- Uncommon ----
+  bird('Skylark','uncommon','day','small', {body:'#8a7a5c',head:'#8a7a5c',wing:'#6a5c44',chest:'#c9b98a',beak:'#c9a04a',eye:'#1a1208',tail:'#6a5c44',leg:'#c9a04a'}, [{part:'crest',color:'#5a4a30',x:10,y:1,w:1,h:1},{part:'streaks',color:'#5a4a30',x:5,y:8,w:3,h:1}], 'Famous for singing continuously while climbing almost out of sight into the sky.', 34, ['field'], {flock:true}),
+
+  // ---- Rare ----
+  bird('Red Kite','rare','day','raptor', {body:'#a8562a',head:'#d9c2a0',wing:'#8a4520',chest:'#c9825a',beak:'#2a2018',eye:'#e8c93a',tail:'#8a4520',leg:'#e8c93a'}, [], 'Easily told apart from other raptors by its deeply forked, twisting tail.', 56, ['field']),
+  bird('Buzzard','rare','day','raptor', {body:'#5a4530',head:'#5a4530',wing:'#4a3826',chest:'#8a7050',beak:'#2a2018',eye:'#c9a04a',tail:'#4a3826',leg:'#e8c93a'}, [], "The UK's most common bird of prey, often soaring in circles with a mewing call.", 54, ['field']),
+  bird('Pheasant','rare','day','corvid', {body:'#a8562a',head:'#2a5a3a',wing:'#8a4520',chest:'#c9825a',beak:'#c9a04a',eye:'#c9302f',tail:'#6a3a1a',leg:'#c9a04a'}, [{part:'wattle',color:'#c9302f',x:11,y:3,w:1,h:1}], 'Males grow an extravagantly long tail and a bright red face to attract mates.', 52, ['field'], {walks:1.8}),
+  bird('Grey Partridge','rare','day','dove', {body:'#9a8a6c',head:'#c9825a',wing:'#7a6c50',chest:'#c9b98a',beak:'#3a2a18',eye:'#1a1208',tail:'#7a6c50',leg:'#c9a04a'}, [{part:'belly',color:'#5a3a20',x:5,y:8,w:3,h:2}], 'Prefers to run rather than fly, staying low and hidden in field margins.', 40, ['field'], {walks:1.8}),
+
+  // ---- Extraordinary ----
+  bird('Kestrel','extraordinary','day','raptor', {body:'#b9793f',head:'#a05a9a',wing:'#8a5a2a',chest:'#e0c99a',beak:'#2a2018',eye:'#1a1208',tail:'#a05a9a',leg:'#e8c93a'}, [{part:'spots',color:'#3a2a18',x:5,y:6,w:5,h:2}], 'Can hover almost motionless in mid-air while scanning for prey.', 48, ['field']),
+  bird('Peregrine Falcon','extraordinary','day','raptor', {body:'#4a5560',head:'#2a2f36',wing:'#3a444c',chest:'#d9d2c4',beak:'#2a2018',eye:'#1a1208',tail:'#2a2f36',leg:'#e8c93a'}, [{part:'hood',color:'#1c1f24',x:10,y:2,w:4,h:3}], 'The fastest animal on Earth, diving at over 240 mph to strike prey.', 54, ['field','mountains'], {dive:0.12}),
+  bird('Hoopoe','extraordinary','day','exotic', {body:'#c9825a',head:'#c9825a',wing:'#1c1a18',chest:'#e0a97a',beak:'#3a2a18',eye:'#1a1208',tail:'#1c1a18',leg:'#3a2a18'}, [{part:'crest',color:'#c9825a',x:9,y:-1,w:1,h:2},{part:'crestTip',color:'#1c1a18',x:9,y:-2,w:1,h:1},{part:'bars',color:'#e8e6de',x:4,y:6,w:6,h:1}], 'Raises its crown feathers into a dramatic fan-shaped crest when excited.', 46, ['field']),
+  bird('Sparrowhawk','extraordinary','day','raptor', {body:'#7a6a5c',head:'#7a6a5c',wing:'#5a4c40',chest:'#d9c2a8',beak:'#2a2018',eye:'#e8c93a',tail:'#4a3c30',leg:'#c9a04a'}, [{part:'barring',color:'#8a6a4a',x:8,y:9,w:3,h:2}], 'Ambushes small birds with short, explosive bursts through hedgerows.', 50, ['field']),
+  bird('Golden Eagle','extraordinary','day','raptor', {body:'#3a2c1c',head:'#5c4326',wing:'#2a1e12',chest:'#4a3a24',beak:'#2a2018',eye:'#e8c93a',tail:'#2a1e12',leg:'#c9a04a'}, [{part:'nape',color:'#c9a24a',x:10,y:2,w:4,h:2}], 'Can spot a rabbit from over a mile away thanks to extraordinary eyesight.', 62, ['field','savannah']),
+  bird('Snowy Owl','extraordinary','night','owl', {body:'#f2f2ea',head:'#f2f2ea',wing:'#e2e2d8',chest:'#ffffff',beak:'#2a2018',eye:'#e8c93a',tail:'#e2e2d8',leg:'#e2e2d8'}, [{part:'speck',color:'#c9c9be',x:5,y:6,w:2,h:1}], 'An Arctic specialist found in open country, occasionally wandering far south in hard winters.', 48, ['field']),
+  // =====================  RAINFOREST  =====================
+  // ---- Common ----
+  bird('Scarlet Macaw','common','day','parrot', {body:'#c9302f',head:'#d9382f',wing:'#e8c93a',chest:'#c9302f',beak:'#e8dcc4',eye:'#e8e6de',tail:'#c9302f',leg:'#5a4a40'}, [{part:'wingtip',color:'#2f6fd9',x:5,y:8,w:4,h:1},{part:'tailtip',color:'#2f6fd9',x:0,y:7,w:2,h:2},{part:'face',color:'#f2f2ea',x:11,y:4,w:2,h:2}], 'Pairs mate for life, and flocks gather at riverbank clay licks to eat mineral-rich soil.', 56, ['rainforest']),
+  bird('Toco Toucan','common','day','toucan', {body:'#1c1a18',head:'#1c1a18',wing:'#141210',chest:'#f2f2ea',beak:'#e8862f',eye:'#2f9fd9',tail:'#141210',leg:'#6a6a70'}, [{part:'throat',color:'#f2f2ea',x:9,y:6,w:3,h:1},{part:'billtip',color:'#1c1a18',x:15,y:3,w:1,h:3}], 'Its enormous bill is light as foam and helps the bird shed excess body heat.', 50, ['rainforest']),
+  bird('Dwarf Kingfisher','common','day','small', {body:'#e8862f',head:'#e8862f',wing:'#2a3a9a',chest:'#f0c27a',beak:'#c9302f',eye:'#1a1208',tail:'#2a3a9a',leg:'#c9302f'}, [{part:'cap',color:'#2a3a9a',x:10,y:2,w:4,h:1}], 'Despite its name it hunts insects and small prey on the forest floor rather than fish.', 30, ['rainforest']),
+
+  // ---- Uncommon ----
+  bird('Great Hornbill','uncommon','day','hornbill', {body:'#1c1a18',head:'#f2eed8',wing:'#141210',chest:'#f2f2ea',beak:'#e8c93a',eye:'#c9302f',tail:'#f2f2ea',leg:'#6a6a70'}, [{part:'casque',color:'#e8b92a',x:12,y:2,w:3,h:1},{part:'wingbar',color:'#f2f2ea',x:5,y:7,w:5,h:1},{part:'tailband',color:'#1c1a18',x:1,y:7,w:2,h:1}], 'Females seal themselves inside a tree hollow to nest, fed through a narrow slit by the male.', 62, ['rainforest']),
+  bird('Cream-coloured Woodpecker','uncommon','day','small', {body:'#e8d99a',head:'#e8d99a',wing:'#8a5a2a',chest:'#f0e6b8',beak:'#c9c2a8',eye:'#1a1208',tail:'#5a3a1a',leg:'#5a5a52'}, [{part:'crest',color:'#f0e6b8',x:9,y:1,w:2,h:1},{part:'malar',color:'#c9302f',x:12,y:5,w:2,h:1}], 'A pale golden woodpecker that feeds mostly on ants and termites high in the canopy.', 36, ['rainforest']),
+
+  // ---- Rare ----
+  bird('Resplendent Quetzal','rare','day','trogon', {body:'#1fae6a',head:'#1fae6a',wing:'#2fc98a',chest:'#c9302f',beak:'#e8c93a',eye:'#1a1208',tail:'#2f9f6a',leg:'#5a4a38'}, [{part:'streamer',color:'#2fc98a',x:0,y:10,w:4,h:2}], 'Males grow tail streamers over a metre long, and the bird was sacred to the Maya and Aztecs.', 52, ['rainforest']),
+  bird('Hoatzin','rare','day','exotic', {body:'#8a6a3a',head:'#2f7fd9',wing:'#6a4a28',chest:'#e0b070',beak:'#c9a04a',eye:'#c9302f',tail:'#5a3a1a',leg:'#5a4a38'}, [{part:'crest1',color:'#c9622f',x:9,y:-1,w:1,h:2},{part:'crest2',color:'#c9622f',x:11,y:-1,w:1,h:2},{part:'wingpatch',color:'#c9622f',x:5,y:6,w:3,h:1}], 'Chicks have claws on their wings for climbing trees, and adults smell so strongly they are nicknamed "stinkbirds".', 48, ['rainforest']),
+  bird('Blue-and-gold Macaw','rare','day','parrot', {body:'#2f7fd9',head:'#2f7fd9',wing:'#2a6fc9',chest:'#e8c93a',beak:'#1c1a18',eye:'#e8e6de',tail:'#2a6fc9',leg:'#3a3a3a'}, [{part:'crown',color:'#3faa5a',x:10,y:2,w:4,h:1},{part:'face',color:'#f2f2ea',x:11,y:4,w:2,h:2},{part:'belly',color:'#e8c93a',x:9,y:6,w:2,h:4}], 'Lives for decades and can mimic human speech with surprising clarity.', 56, ['rainforest']),
+  bird('Hummingbird','rare','day','hummer', {body:'#2fae6a',head:'#2fae6a',wing:'#9fb8b0',chest:'#e8e6de',beak:'#1a1a1a',eye:'#1a1208',tail:'#1f7a4a',leg:'#3a3a3a'}, [{part:'throat',color:'#c9302f',x:10,y:6,w:2,h:1}], 'Beats its wings up to 80 times a second and can hover or even fly backwards.', 26, ['rainforest'], {speed:10}),
+  bird('Harpy Eagle','rare','day','raptor', {body:'#4a4a52',head:'#9aa0a8',wing:'#2a2a30',chest:'#f2f2ea',beak:'#2a2a2a',eye:'#d9d9d0',tail:'#2a2a30',leg:'#e8c93a'}, [{part:'crest1',color:'#2a2a30',x:10,y:1,w:1,h:1},{part:'crest2',color:'#2a2a30',x:12,y:1,w:1,h:1},{part:'band',color:'#1c1a18',x:9,y:6,w:3,h:1}], 'Its talons rival a grizzly bear\'s claws, strong enough to snatch sloths and monkeys from the canopy.', 64, ['rainforest']),
+  bird('Cockatoo','rare','day','parrot', {body:'#f2f2ea',head:'#f2f2ea',wing:'#e2e2d8',chest:'#ffffff',beak:'#3a3a3a',eye:'#1a1208',tail:'#e2e2d8',leg:'#5a5a5a'}, [{part:'crest',color:'#f2d84a',x:9,y:0,w:2,h:3},{part:'crest2',color:'#f2d84a',x:11,y:1,w:1,h:2}], 'Raises its showy crest when excited or alarmed, and is famous for bobbing along to music.', 50, ['rainforest']),
+  bird('Keel-billed Toucan','rare','day','toucan', {body:'#1c1a18',head:'#1c1a18',wing:'#141210',chest:'#e8d84a',beak:'#4fae3a',eye:'#2f9fd9',tail:'#141210',leg:'#4a6ac9'}, [{part:'throat',color:'#e8d84a',x:9,y:6,w:3,h:1},{part:'billstripe',color:'#e8862f',x:12,y:4,w:3,h:1},{part:'billtip',color:'#c9302f',x:15,y:3,w:1,h:3},{part:'vent',color:'#c9302f',x:1,y:9,w:2,h:1}], 'Its rainbow bill earns it the nickname "Froot Loops bird" and reaches fruit on slender branches.', 46, ['rainforest']),
+  bird('Common Potoo','rare','night','potoo', {body:'#8a7a68',head:'#8a7a68',wing:'#6a5c48',chest:'#a8987e',beak:'#5a4a38',eye:'#e8c93a',tail:'#6a5c48',leg:'#5a4a38'}, [{part:'eyeL',color:'#e8c93a',x:4,y:1,w:1,h:2},{part:'eyeR',color:'#e8c93a',x:9,y:1,w:1,h:2},{part:'mottle',color:'#4a3e30',x:5,y:6,w:4,h:2}], 'Freezes upright on a stump by day, looking just like a broken branch.', 48, ['rainforest']),
+  bird('King Vulture','rare','day','raptor', {body:'#ece6d4',head:'#e0602f',wing:'#1c1a18',chest:'#e8e2cc',beak:'#e8862f',eye:'#f2f2ea',tail:'#1c1a18',leg:'#5a5a5a'}, [{part:'caruncle',color:'#e8c93a',x:13,y:2,w:1,h:2},{part:'ruff',color:'#2a2a2a',x:9,y:5,w:3,h:1},{part:'headpatch',color:'#7a4ac9',x:11,y:4,w:2,h:1}], 'Its strong bill tears open carcasses that smaller vultures cannot, so it often leads the feast.', 60, ['rainforest']),
+
+  // ---- Extraordinary ----
+  bird('Kākā','extraordinary','day','parrot', {body:'#6a5a3a',head:'#9aa08a',wing:'#4a5a32',chest:'#8a6a3a',beak:'#3a3a3a',eye:'#1a1208',tail:'#4a5a32',leg:'#4a4a42'}, [{part:'belly',color:'#c9422f',x:5,y:9,w:3,h:2},{part:'collar',color:'#c9622f',x:9,y:6,w:3,h:1}], 'A bold, clever New Zealand parrot that uses a brush-tipped tongue to sip nectar and sap.', 48, ['rainforest']),
+  bird('Kākāpō','extraordinary','night','kakapo', {body:'#7aa84a',head:'#86b254',wing:'#5a8a3a',chest:'#c9d89a',beak:'#e8d8b0',eye:'#1a1208',tail:'#5a8a3a',leg:'#b8a898'}, [{part:'hook',color:'#e8d8b0',x:15,y:7,w:1,h:1},{part:'whiskers',color:'#a9c870',x:12,y:5,w:2,h:1},{part:'mottle',color:'#3a5a24',x:4,y:6,w:5,h:2},{part:'barring',color:'#3a5a24',x:4,y:9,w:5,h:1}], 'The heaviest parrot in the world; males boom from shallow bowls in the ground at night to attract mates.', 50, ['rainforest'], {walks:1.3}),
+  bird('Hyacinth Macaw','extraordinary','day','parrot', {body:'#2a3fb5',head:'#2a3fb5',wing:'#1f2f9a',chest:'#2f46c9',beak:'#1c1a18',eye:'#e8e6de',tail:'#1f2f9a',leg:'#3a3a3a'}, [{part:'chinpatch',color:'#e8c93a',x:12,y:6,w:2,h:1},{part:'eyering',color:'#e8c93a',x:11,y:4,w:2,h:1}], 'The largest flying parrot, with a bill strong enough to crack open hard palm nuts.', 60, ['rainforest']),
+  bird('Southern Cassowary','extraordinary','day','cassowary', {body:'#1c1a18',head:'#2f6fd9',wing:'#141210',chest:'#2a2a2a',beak:'#c9a04a',eye:'#c9302f',tail:'#141210',leg:'#c9b98a'}, [{part:'casque',color:'#d9a23a',x:9,y:0,w:3,h:1},{part:'wattle',color:'#c9302f',x:10,y:3,w:1,h:2}], 'A flightless giant that sprints through dense jungle and carries dagger-like claws on its feet.', 70, ['rainforest'], {walks:1.6}),
+  bird("Spix's Macaw",'extraordinary','day','parrot', {body:'#6f9fc9',head:'#9fb9c9',wing:'#5a8ab5',chest:'#7fa9c9',beak:'#2a2a2a',eye:'#e8e6de',tail:'#5a8ab5',leg:'#3a3a3a'}, [{part:'face',color:'#3a3a3a',x:11,y:4,w:2,h:2}], 'Once declared extinct in the wild, it is now being reintroduced to Brazil from captive breeding.', 46, ['rainforest']),
+  bird('Superb Bird-of-paradise','extraordinary','day','exotic', {body:'#141418',head:'#141418',wing:'#0e0e12',chest:'#1c1c22',beak:'#c9c2a8',eye:'#e8e6de',tail:'#0e0e12',leg:'#5a6a8a'}, [{part:'shield',color:'#2fc9b0',x:8,y:5,w:3,h:3},{part:'sheen',color:'#2f7fd9',x:10,y:2,w:3,h:1}], 'Males flip up a black cape into a glowing blue-green oval to win a mate.', 44, ['rainforest']),
+
+  // =====================  SAVANNAH  =====================
+  // ---- Common ----
+  bird('Savannah Sparrow','common','day','small', {body:'#8a7355',head:'#9a8460',wing:'#6b5940',chest:'#e8dcc4',beak:'#c9a98a',eye:'#1a1208',tail:'#5c4a35',leg:'#c9a98a'}, [{part:'brow',color:'#e8c93a',x:11,y:2,w:2,h:1},{part:'streak1',color:'#4a3a28',x:5,y:8,w:1,h:2},{part:'streak2',color:'#4a3a28',x:7,y:8,w:1,h:2}], 'Named after Savannah, Georgia, where it was first described, and not after the grassland habitat.', 30, ['savannah']),
+  bird('Cactus Wren','common','day','small', {body:'#8a6a48',head:'#6a4a30',wing:'#5a4430',chest:'#e8dcc4',beak:'#4a3a28',eye:'#1a1208',tail:'#4a3a28',leg:'#4a3a28'}, [{part:'brow',color:'#f2f2ea',x:10,y:2,w:4,h:1},{part:'spots1',color:'#3a2a1a',x:4,y:8,w:3,h:1},{part:'spots2',color:'#3a2a1a',x:7,y:9,w:2,h:1}], 'The largest wren in the US, it builds football-shaped nests inside thorny cacti.', 34, ['savannah']),
+  bird('Desert Finch','common','day','small', {body:'#c9b08a',head:'#c9b08a',wing:'#3a3a3a',chest:'#d9c9a8',beak:'#2a2a2a',eye:'#1a1208',tail:'#3a3a3a',leg:'#8a6a4a'}, [{part:'panel',color:'#e08a9a',x:5,y:7,w:3,h:1}], 'A pale, sand-coloured finch of dry scrub whose pink wing patches flash when it takes off.', 30, ['savannah']),
+  bird('Verdin','common','day','small', {body:'#9a9a92',head:'#e8d04a',wing:'#7a7a72',chest:'#b8b8b0',beak:'#3a3a3a',eye:'#1a1208',tail:'#7a7a72',leg:'#4a4a4a'}, [{part:'shoulder',color:'#a8502a',x:5,y:6,w:2,h:1}], 'A tiny desert songbird that builds ball-shaped thorny nests and keeps spares for roosting on cold nights.', 24, ['savannah']),
+
+  // ---- Uncommon ----
+  bird('Roadrunner','uncommon','day','roadrunner', {body:'#6a5a3a',head:'#6a5a3a',wing:'#4a3a24',chest:'#e8dcc4',beak:'#4a4a4a',eye:'#e8c93a',tail:'#3a3a2a',leg:'#8a8a8a'}, [{part:'streak1',color:'#e8dcc4',x:5,y:5,w:1,h:1},{part:'streak2',color:'#e8dcc4',x:7,y:6,w:1,h:1},{part:'patch',color:'#2f9fd9',x:12,y:5,w:2,h:1}], 'Prefers to sprint at around 20 mph rather than fly, and can catch lizards and even rattlesnakes.', 52, ['savannah'], {walks:4}),
+  bird('Desert Cardinal','uncommon','day','small', {body:'#8a8a8a',head:'#8a8a8a',wing:'#6a5a5a',chest:'#c9302f',beak:'#e8c93a',eye:'#1a1208',tail:'#a8302a',leg:'#6a5a4a'}, [{part:'crest',color:'#c9302f',x:9,y:0,w:3,h:2},{part:'mask',color:'#c9302f',x:12,y:4,w:2,h:2},{part:'belly',color:'#c9302f',x:7,y:8,w:2,h:3}], 'A grey cousin of the Northern Cardinal with a red crest and a thick, parrot-like yellow bill.', 36, ['savannah']),
+
+  // ---- Rare ----
+  bird('Ostrich','rare','day','ostrich', {body:'#1c1a18',head:'#d9b0a0',wing:'#f2f2ea',chest:'#2a2a28',beak:'#c9a04a',eye:'#1a1208',tail:'#f2f2ea',leg:'#d9b0a0'}, [], 'The largest bird in the world, and the fastest on two legs, sprinting at about 45 mph.', 80, ['savannah'], {walks:2.2}),
+  bird('Burrowing Owl','rare','both','burrowowl', {body:'#9a7a4a',head:'#9a7a4a',wing:'#7a5c34',chest:'#e8dcc4',beak:'#c9b98a',eye:'#e8c93a',tail:'#7a5c34',leg:'#c9b98a'}, [{part:'brow1',color:'#f2f2ea',x:4,y:1,w:2,h:1},{part:'brow2',color:'#f2f2ea',x:8,y:1,w:2,h:1},{part:'spot1',color:'#f2f2ea',x:4,y:7,w:1,h:1},{part:'spot2',color:'#f2f2ea',x:7,y:8,w:1,h:1}], 'Lives underground in abandoned burrows and hunts by day as well as at night.', 40, ['savannah']),
+  bird('Elf Owl','rare','night','owl', {body:'#8a7a68',head:'#8a7a68',wing:'#6a5c48',chest:'#c9b98a',beak:'#8a7a5a',eye:'#e8c93a',tail:'#6a5c48',leg:'#c9b98a'}, [{part:'brow1',color:'#e8e6de',x:4,y:1,w:2,h:1},{part:'brow2',color:'#e8e6de',x:8,y:1,w:2,h:1}], 'The smallest owl in the world, no bigger than a sparrow, often nesting in old woodpecker holes in saguaros.', 28, ['savannah']),
+  bird('Sandgrouse','rare','day','dove', {body:'#c9a878',head:'#d9c090',wing:'#a8844a',chest:'#8a5a34',beak:'#6a5a4a',eye:'#1a1208',tail:'#8a6a3a',leg:'#a89a8a'}, [{part:'band',color:'#3a2a1a',x:5,y:9,w:4,h:1},{part:'throat',color:'#3a3a3a',x:12,y:5,w:2,h:1}], 'Males soak their belly feathers at waterholes and carry the water back to their chicks.', 40, ['savannah'], {walks:1.8, flock:true}),
+
+  // ---- Extraordinary (Golden Eagle is shared with the Field biome) ----
+  bird('Red-tailed Hawk','extraordinary','day','raptor', {body:'#6a4c30',head:'#5c4326',wing:'#4a3624',chest:'#e8dcc4',beak:'#2a2018',eye:'#e8c93a',tail:'#c9582a',leg:'#c9a04a'}, [{part:'band',color:'#4a3624',x:5,y:9,w:5,h:1}], 'Its raspy scream is the sound usually dubbed over bald eagles in films and TV.', 56, ['savannah']),
+  bird('Turkey Vulture','extraordinary','day','raptor', {body:'#3a2c24',head:'#d9382f',wing:'#2a1e18',chest:'#4a3a30',beak:'#e8dcc4',eye:'#1a1208',tail:'#2a1e18',leg:'#d9a0a0'}, [{part:'flight',color:'#6a5a4a',x:2,y:7,w:6,h:1}], 'Unusually for a bird, it finds food by smell, sniffing out carrion from high above.', 60, ['savannah']),
+  bird('Hooded Vulture','extraordinary','day','raptor', {body:'#6a5a48',head:'#e0b0a0',wing:'#4a3a2a',chest:'#8a7a68',beak:'#8a7a6a',eye:'#1a1208',tail:'#4a3a2a',leg:'#a89a8a'}, [{part:'down',color:'#e8e2cc',x:9,y:5,w:3,h:1}], 'A small, slender-billed African vulture that picks scraps from carcasses and often lingers around villages.', 50, ['savannah']),
+
+  // =====================  MOUNTAINS  =====================
+  // ---- Common ----
+  bird('Meadow Pipit','common','day','small', {body:'#8a7a5a',head:'#8a7a5a',wing:'#6a5a40',chest:'#e8dcc4',beak:'#4a3a28',eye:'#1a1208',tail:'#5a4a30',leg:'#c9a98a'}, [{part:'streak1',color:'#4a3a28',x:5,y:8,w:1,h:2},{part:'streak2',color:'#4a3a28',x:7,y:8,w:1,h:2}], 'A streaky little songbird of open uplands that parachutes down on spread wings while singing.', 28, ['mountains']),
+  bird('Common Raven','common','day','corvid', {body:'#1a1a22',head:'#1a1a22',wing:'#10101a',chest:'#22222c',beak:'#1c1a18',eye:'#4a4a5a',tail:'#10101a',leg:'#2a2a2a'}, [{part:'throat',color:'#2a2a34',x:12,y:6,w:2,h:1}], 'The largest songbird in the world, famous for aerial rolls and for solving puzzles.', 58, ['mountains']),
+  bird('Alpine Chough','common','day','corvid', {body:'#1c1a1a',head:'#1c1a1a',wing:'#121010',chest:'#2a2828',beak:'#e8c93a',eye:'#e8e6de',tail:'#121010',leg:'#c9302f'}, [], 'Has been seen at over 8,000 m on Mount Everest, higher than almost any other bird.', 40, ['mountains']),
+
+  // ---- Uncommon ----
+  bird('Ptarmigan','uncommon','day','dove', {body:'#d8d4c8',head:'#d8d4c8',wing:'#b8b2a0',chest:'#f2f2ea',beak:'#2a2a2a',eye:'#1a1208',tail:'#3a3a3a',leg:'#e8e6de'}, [{part:'brow',color:'#c9302f',x:11,y:2,w:2,h:1},{part:'mottle',color:'#8a7a5a',x:5,y:7,w:2,h:1}], 'Turns from mottled brown in summer to pure white in winter, with feathered feet that work like snowshoes.', 40, ['mountains'], {walks:1.8}),
+  bird('Rock Thrush','uncommon','day','small', {body:'#d9702f',head:'#4a7ab5',wing:'#4a5a7a',chest:'#d9702f',beak:'#2a2a2a',eye:'#1a1208',tail:'#c9582a',leg:'#3a3a3a'}, [{part:'back',color:'#4a7ab5',x:4,y:5,w:5,h:1}], 'The male flashes a blue head and an orange chest as he sings from crags and boulders.', 34, ['mountains']),
+  bird('Northern Wheatear','uncommon','day','small', {body:'#9aa0a8',head:'#9aa0a8',wing:'#2a2a30',chest:'#e0c9a0',beak:'#1c1a18',eye:'#1a1208',tail:'#1c1a18',leg:'#2a2a2a'}, [{part:'mask',color:'#1c1a18',x:11,y:4,w:3,h:1},{part:'rump',color:'#f2f2ea',x:3,y:6,w:1,h:2}], 'Makes one of the longest migrations of any songbird, flying from the Arctic to sub-Saharan Africa.', 32, ['mountains']),
+  bird('Mountain Parakeet','uncommon','day','parrot', {body:'#4fae3a',head:'#6fc84a',wing:'#3a9a2a',chest:'#8ad05a',beak:'#c9a04a',eye:'#1a1208',tail:'#3a9a2a',leg:'#8a7a6a'}, [{part:'face',color:'#e8c93a',x:12,y:3,w:2,h:2}], 'Nests in burrows and rock crevices in the high Andes, sometimes above 4,000 m.', 34, ['mountains'], {flock:true}),
+  bird('Nutcracker','uncommon','day','corvid', {body:'#6a4a30',head:'#6a4a30',wing:'#2a2a2a',chest:'#7a5a3a',beak:'#1c1a18',eye:'#1a1208',tail:'#2a2a2a',leg:'#2a2a2a'}, [{part:'spot1',color:'#f2f2ea',x:5,y:8,w:1,h:1},{part:'spot2',color:'#f2f2ea',x:7,y:7,w:1,h:1},{part:'spot3',color:'#f2f2ea',x:8,y:9,w:1,h:1},{part:'undertail',color:'#f2f2ea',x:0,y:6,w:1,h:1}], 'Buries thousands of pine seeds each autumn and remembers most of the hiding places through winter.', 42, ['mountains']),
+
+  // ---- Rare ----
+  bird('Himalayan Monal','rare','day','exotic', {body:'#2a6aa9',head:'#1f9a7a',wing:'#2a8a9a',chest:'#1c1c28',beak:'#8a8a7a',eye:'#1a1208',tail:'#a8502a',leg:'#8a8a8a'}, [{part:'tuft',color:'#2fc9a0',x:11,y:0,w:2,h:1},{part:'neck',color:'#c9722f',x:10,y:5,w:3,h:2},{part:'rump',color:'#f2f2ea',x:3,y:5,w:2,h:2}], 'Males gleam with metallic rainbow colours, and the species is the national bird of Nepal.', 54, ['mountains'], {walks:1.8}),
+  bird('Mountain Bluebird','rare','day','small', {body:'#5aa0e0',head:'#5aa0e0',wing:'#4a90d0',chest:'#9ac8f0',beak:'#2a2a2a',eye:'#1a1208',tail:'#4a90d0',leg:'#2a2a2a'}, [], 'The male glows a vivid sky-blue, and hovers over open ground hunting for insects.', 32, ['mountains']),
+  bird('Wallcreeper','rare','day','small', {body:'#7a7f88',head:'#7a7f88',wing:'#c9302f',chest:'#5a5f68',beak:'#2a2a2a',eye:'#1a1208',tail:'#3a3f48',leg:'#2a2a2a'}, [{part:'spot1',color:'#f2f2ea',x:5,y:7,w:1,h:1},{part:'spot2',color:'#f2f2ea',x:7,y:8,w:1,h:1},{part:'flight',color:'#1c1a18',x:6,y:9,w:3,h:1}], 'Climbs sheer cliff faces like a butterfly, flicking open crimson wings with white spots.', 32, ['mountains']),
+  bird('Black Grouse','rare','day','dove', {body:'#1a1a2a',head:'#1a1a2a',wing:'#10101a',chest:'#22222e',beak:'#2a2a2a',eye:'#1a1208',tail:'#10101a',leg:'#3a3a3a'}, [{part:'brow',color:'#c9302f',x:11,y:2,w:2,h:1},{part:'wingbar',color:'#f2f2ea',x:5,y:7,w:4,h:1},{part:'undertail',color:'#f2f2ea',x:1,y:9,w:2,h:1}], 'Males gather at dawn on display grounds called leks, fanning out their lyre-shaped tails.', 44, ['mountains'], {walks:1.8}),
+
+  // ---- Extraordinary (Peregrine Falcon is shared with the Field biome) ----
+  bird('Bearded Vulture','extraordinary','day','raptor', {body:'#4a3a32',head:'#e8dcc4',wing:'#3a3a42',chest:'#d9822f',beak:'#8a8a8a',eye:'#e8c93a',tail:'#3a3a42',leg:'#5a5a5a'}, [{part:'mask',color:'#1c1a18',x:11,y:3,w:3,h:1},{part:'beard',color:'#1c1a18',x:13,y:5,w:1,h:2}], 'Drops bones from great heights to smash them open, then swallows the pieces whole.', 64, ['mountains']),
+  bird('Andean Condor','extraordinary','day','raptor', {body:'#1c1a1e',head:'#c9a090',wing:'#1c1a1e',chest:'#2a2a2e',beak:'#e8e2cc',eye:'#3a2a1a',tail:'#1c1a1e',leg:'#5a5a5a'}, [{part:'collar',color:'#f2f2ea',x:9,y:5,w:4,h:1},{part:'patch',color:'#f2f2ea',x:3,y:6,w:5,h:1},{part:'comb',color:'#6a4a3a',x:11,y:1,w:2,h:1}], 'With a wingspan of around three metres, it soars for hours without flapping its wings.', 72, ['mountains']),
+  bird('Kea','extraordinary','day','parrot', {body:'#6a7a3a',head:'#6a7a3a',wing:'#4a5a2a',chest:'#7a8a46',beak:'#3a3a3a',eye:'#1a1208',tail:'#4a5a2a',leg:'#4a4a42'}, [{part:'underwing',color:'#e8662f',x:5,y:8,w:3,h:1},{part:'rump',color:'#e8862f',x:2,y:8,w:2,h:1}], 'The only alpine parrot in the world, famously curious and clever, and known to tinker with rubber seals and hikers\' gear.', 50, ['mountains']),
+
+  // =====================  COAST  =====================
+  // ---- Common ----
+  bird('Herring Gull','common','day','gull', {body:'#f2f2ee',head:'#f2f2ee',wing:'#aab4bd',chest:'#ffffff',beak:'#e8c93a',eye:'#e8c93a',tail:'#f2f2ee',leg:'#e8a0a0'}, [{part:'wingtip',color:'#1c1a18',x:1,y:5,w:2,h:3},{part:'spot',color:'#d9382f',x:15,y:6,w:1,h:1}], 'A clever scavenger that drops shellfish onto rocks to crack them open.', 46, ['coast'], {flock:true}),
+  bird('Black-headed Gull','common','day','gull', {body:'#f2f2ee',head:'#4a3228',wing:'#c4ccd4',chest:'#ffffff',beak:'#c9302f',eye:'#e8e6de',tail:'#f2f2ee',leg:'#c9302f'}, [{part:'edge',color:'#ffffff',x:2,y:5,w:8,h:1}], 'Its hood is chocolate brown, not black, and it moults to a white head with a dark spot in winter.', 38, ['coast'], {flock:true}),
+  bird('Oystercatcher','common','day','wader', {body:'#1c1a18',head:'#1c1a18',wing:'#141210',chest:'#f2f2ea',beak:'#f07a2a',eye:'#d9382f',tail:'#f2f2ea',leg:'#e8a0a0'}, [], 'Prises open mussels and cockles with its flattened orange bill, though it rarely eats oysters.', 46, ['coast'], {walks:1.8}),
+  bird('Sanderling','common','day','small', {body:'#c9c4b8',head:'#e8e6dd',wing:'#8a8578',chest:'#ffffff',beak:'#2a2a2a',eye:'#1a1208',tail:'#8a8578',leg:'#2a2a2a'}, [], 'Runs back and forth with the waves like a clockwork toy, chasing tiny prey in the wet sand.', 28, ['coast'], {walks:2.4, flock:true}),
+
+  // ---- Uncommon (Cormorant is shared with the River) ----
+  bird('Ringed Plover','uncommon','day','small', {body:'#9a8a6a',head:'#9a8a6a',wing:'#7a6a4a',chest:'#ffffff',beak:'#e8862f',eye:'#1a1208',tail:'#7a6a4a',leg:'#e8862f'}, [{part:'collar',color:'#1c1a18',x:10,y:7,w:4,h:1},{part:'brow',color:'#ffffff',x:9,y:2,w:3,h:1}], 'Nests on open shingle, where its eggs and chicks are almost invisible among the pebbles.', 28, ['coast']),
+  bird('Turnstone','uncommon','day','small', {body:'#8a5a2a',head:'#e8e6dd',wing:'#5a3a1a',chest:'#f2f2ea',beak:'#2a2a2a',eye:'#1a1208',tail:'#3a2a1a',leg:'#e8862f'}, [{part:'patch',color:'#1c1a18',x:10,y:5,w:3,h:2},{part:'back',color:'#c9622f',x:5,y:5,w:3,h:1}], 'Flips over stones, shells and seaweed with its bill to find hidden food.', 30, ['coast'], {walks:2}),
+  bird('Common Tern','uncommon','day','gull', {body:'#f2f2ee',head:'#f2f2ee',wing:'#c4ccd4',chest:'#ffffff',beak:'#e8502f',eye:'#1a1208',tail:'#f2f2ee',leg:'#e8502f'}, [{part:'cap',color:'#1c1a18',x:10,y:3,w:4,h:1}], 'Hovers above the water before plunging in headfirst to catch small fish.', 34, ['coast'], {flock:true}),
+  bird('Rock Pipit','uncommon','day','small', {body:'#7a7254',head:'#7a7254',wing:'#5a5440',chest:'#c9c2a8',beak:'#3a3228',eye:'#1a1208',tail:'#5a5440',leg:'#5a4a38'}, [{part:'streak1',color:'#4a4430',x:5,y:8,w:1,h:2},{part:'streak2',color:'#4a4430',x:7,y:8,w:1,h:2}], 'A streaky shoreline songbird that picks insects and tiny shellfish from rocks and seaweed.', 28, ['coast']),
+
+  // ---- Rare ----
+  bird('Gannet','rare','day','gull', {body:'#f4f4f0',head:'#f0e0a0',wing:'#f4f4f0',chest:'#ffffff',beak:'#a8b8c8',eye:'#9ac8e0',tail:'#f4f4f0',leg:'#3a3a3a'}, [{part:'wingtip',color:'#1c1a18',x:1,y:5,w:3,h:3}], 'Plunge-dives from up to 30 m at around 60 mph, cushioned by air sacs under its skin.', 64, ['coast'], {plunge:0.4}),
+  bird('Razorbill','rare','day','dove', {body:'#1c1a1e',head:'#1c1a1e',wing:'#141418',chest:'#f2f2ea',beak:'#1c1a1e',eye:'#1a1208',tail:'#141418',leg:'#3a3a3a'}, [{part:'billline',color:'#f2f2ea',x:15,y:4,w:1,h:1},{part:'belly',color:'#f2f2ea',x:6,y:8,w:4,h:3}], 'A close relative of the puffin that swims underwater using its wings, and nests on cliff ledges.', 40, ['coast']),
+  bird('Eider','rare','day','waterfowl', {body:'#f2f2ea',head:'#f2f2ea',wing:'#1c1a18',chest:'#f0c8c0',beak:'#a8b890',eye:'#1a1208',tail:'#1c1a18',leg:'#5a6a5a'}, [{part:'cap',color:'#1c1a18',x:10,y:0,w:4,h:1},{part:'nape',color:'#8ac8a0',x:10,y:2,w:2,h:1},{part:'belly',color:'#1c1a18',x:5,y:9,w:5,h:2}], 'Its soft down, the original eiderdown, is so warm it has filled quilts for centuries.', 52, ['coast']),
+  bird('Curlew','rare','day','wader', {body:'#9a7a56',head:'#a88a64',wing:'#6a4c30',chest:'#d9c4a0',beak:'#3a2a1a',eye:'#1a1208',tail:'#6a4c30',leg:'#6a7a8a'}, [{part:'billcurve',color:'#3a2a1a',x:15,y:2,w:1,h:2}], 'The largest European wader, with a long down-curved bill and a haunting, bubbling call.', 60, ['coast']),
+  bird('Little Egret','rare','day','wader', {body:'#fafaf8',head:'#fafaf8',wing:'#ececea',chest:'#ffffff',beak:'#1c1a18',eye:'#e8c93a',tail:'#fafaf8',leg:'#1c1a18'}, [{part:'foot1',color:'#e8d84a',x:4,y:15,w:3,h:1},{part:'foot2',color:'#e8d84a',x:7,y:15,w:3,h:1},{part:'plume',color:'#fafaf8',x:7,y:5,w:2,h:1}], 'Stirs the mud with a bright yellow foot to flush out small fish and shrimp.', 52, ['coast']),
+  bird('Storm Petrel','rare','night','small', {body:'#2a2a30',head:'#2a2a30',wing:'#1c1c22',chest:'#3a3a42',beak:'#1c1a18',eye:'#1a1208',tail:'#1c1c22',leg:'#1c1a18'}, [{part:'rump',color:'#f2f2ea',x:2,y:6,w:2,h:2}], 'One of the smallest seabirds, it flutters low over the waves and only comes ashore at night.', 26, ['coast']),
+
+  // ---- Extraordinary ----
+  bird('White-tailed Sea Eagle','extraordinary','day','raptor', {body:'#6a5a48',head:'#b8a58a',wing:'#4a3c2e',chest:'#7a6a56',beak:'#e8c93a',eye:'#e8e6de',tail:'#f4f4f0',leg:'#e8c93a'}, [], 'One of the largest eagles in Europe, with a wingspan of up to 2.5 m and a short, wedge-shaped white tail.', 74, ['coast']),
+  bird('Albatross','extraordinary','day','gull', {body:'#f4f4f0',head:'#f4f4f0',wing:'#3a3a42',chest:'#ffffff',beak:'#e8b8b0',eye:'#1a1208',tail:'#f4f4f0',leg:'#e8b8b0'}, [], 'Glides for hours on wings that span over 3 m, circling the globe with barely a flap.', 86, ['coast']),
+  bird('Emperor Penguin','extraordinary','day','penguin', {body:'#1c2430',head:'#141a24',wing:'#10161e',chest:'#f2efe4',beak:'#c9a04a',eye:'#e8e6de',tail:'#10161e',leg:'#2a2a30'}, [{part:'belly',color:'#f2efe4',x:8,y:6,w:3,h:7},{part:'ear',color:'#f0b830',x:8,y:2,w:2,h:2},{part:'chest',color:'#f0d070',x:9,y:5,w:2,h:2}], 'The tallest and heaviest penguin, and the only one that breeds through the Antarctic winter.', 66, ['coast'], {walks:1.6}),
+  bird('Great Skua','extraordinary','day','gull', {body:'#5a4a3a',head:'#5a4a3a',wing:'#4a3a2c',chest:'#6a5a48',beak:'#2a2a2a',eye:'#e8e6de',tail:'#4a3a2c',leg:'#2a2a2a'}, [{part:'flash',color:'#f2f2ea',x:3,y:5,w:2,h:2}], 'A bold pirate of the seabird world that chases other birds until they drop their catch, and will even dive at people near its nest.', 56, ['coast']),
+
+  // =====================  SEASONAL  =====================
+  // Extraordinary-level rarity, but each one only appears during its own season (see getCurrentSeason).
+  // ---- Spring (1 Mar – 31 May) ----
+  bird('Ruff','seasonal','day','wader', {body:'#8a6a4a',head:'#c9a97a',wing:'#6a4c30',chest:'#e8dcc4',beak:'#c9a04a',eye:'#1a1208',tail:'#5a4630',leg:'#e8862f'}, [{part:'ruff',color:'#e0a84a',x:8,y:2,w:4,h:3},{part:'ruffband',color:'#3a2a18',x:8,y:5,w:4,h:1}], 'In spring, males grow a flamboyant ruff of feathers and gather on display grounds called leks.', 42, ['river'], {season:'spring'}),
+  // ---- Summer (1 Jun – 31 Aug) ----
+  bird("Montagu's Harrier",'seasonal','day','raptor', {body:'#aab4bc',head:'#aab4bc',wing:'#8a96a0',chest:'#e8e6de',beak:'#2a2018',eye:'#e8c93a',tail:'#8a96a0',leg:'#e8c93a'}, [{part:'wingtip',color:'#1c1a18',x:2,y:5,w:2,h:3},{part:'wingbar',color:'#1c1a18',x:6,y:6,w:1,h:2},{part:'streaks',color:'#a8562a',x:5,y:9,w:4,h:1}], 'A summer visitor that glides low over fields on slender wings and nests on the ground among crops.', 52, ['field'], {season:'summer'}),
+  bird('Puffin','seasonal','day','toucan', {body:'#1c1a1e',head:'#1c1a1e',wing:'#141418',chest:'#f2f2ea',beak:'#f0602a',eye:'#1a1208',tail:'#141418',leg:'#f07a2a'}, [{part:'face',color:'#d8d8dc',x:9,y:5,w:3,h:2},{part:'billbase',color:'#e8c93a',x:12,y:3,w:1,h:3},{part:'belly',color:'#f2f2ea',x:5,y:8,w:4,h:3}], 'In summer it carries a row of sand eels crosswise in its colourful bill, and sheds the bright outer plates after breeding.', 36, ['coast'], {season:'summer'}),
+  // ---- Autumn (1 Sep – 30 Nov) ----
+  bird('Sora','seasonal','day','small', {body:'#8a7a52',head:'#8a7a52',wing:'#6a5a38',chest:'#9aa4aa',beak:'#e8c93a',eye:'#c9302f',tail:'#5a4a30',leg:'#a8c24a'}, [{part:'throat',color:'#1c1a18',x:12,y:4,w:2,h:2},{part:'undertail',color:'#f2f2ea',x:0,y:6,w:2,h:1}], 'A secretive little marsh bird that is far more often heard than seen, with a descending whinny call.', 32, ['river'], {season:'autumn'}),
+  // ---- Winter (1 Dec – 28/29 Feb) ----
+  bird('Glossy Ibis','seasonal','day','wader', {body:'#6a3a2a',head:'#4a3a2a',wing:'#2a5a4a',chest:'#7a4030',beak:'#5a4a38',eye:'#1a1208',tail:'#2a4a3a',leg:'#5a4a38'}, [{part:'sheen',color:'#3fae8a',x:5,y:7,w:4,h:1},{part:'billcurve',color:'#5a4a38',x:15,y:2,w:1,h:2}], 'A wetland wanderer whose dark plumage shimmers bronze and green when the light hits it.', 54, ['river'], {season:'winter'})
+];
+
+function bird(name, tier, phase, shape, colors, marks, fact, size, biomes, extra){
+  return Object.assign(
+    { id:name.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-'), name, tier, phase, shape, colors, marks, fact, size, biomes: biomes||['forest'] },
+    extra || {}   // optional: { season:'spring'|'summer'|'autumn'|'winter' } for seasonal birds, { walks:2 } for flightless ones (the number is how fast they run compared with a flying bird), { dive:0.12 } for birds with a chance of a 10x-speed dive, { flock:true } for birds that sometimes arrive in groups, { speed:10 } for birds that move faster or slower than normal, { plunge:0.4 } for birds that sometimes plunge-dive into the sea
+  );
+}
+
+/* ============================== PIXEL BIRD RENDERER ============================== */
+function drawBird(g, b, cx, cy, size, wingFlap, facingRight, opacity){
+  const shape = SHAPES[b.shape];
+  const px = size/16;
+  g.save();
+  g.globalAlpha = (opacity===undefined?1:opacity);
+  g.translate(cx, cy);
+  if(!facingRight) g.scale(-1,1);
+  g.translate(-size/2, -size/2);
+
+  function rect(r, color, yOff){
+    if(!r) return;
+    g.fillStyle = color;
+    g.fillRect(Math.round(r.x*px), Math.round((r.y+(yOff||0))*px), Math.ceil(r.w*px), Math.ceil(r.h*px));
+  }
+  const c = b.colors;
+  const flap = Math.sin(wingFlap)*1.1;
+
+  rect(shape.tail, c.tail);
+  rect(shape.body, c.body);
+  if(shape.neck) rect(shape.neck, c.head);
+  if(Array.isArray(shape.legs)) shape.legs.forEach(l=>rect(l, c.leg));
+  rect(shape.wing, c.wing, flap);
+  rect(shape.head, c.head);
+  if(shape.crest) rect(shape.crest, c.body);
+  rect(shape.beak, c.beak);
+  if(Array.isArray(shape.eye)) shape.eye.forEach(e=>rect(e,'#12100c'));
+  else rect(shape.eye, '#12100c');
+  // pupil glint
+  if(!Array.isArray(shape.eye) && shape.eye){
+    g.fillStyle = c.eye;
+    g.fillRect(Math.round((shape.eye.x)*px), Math.round(shape.eye.y*px), Math.ceil(shape.eye.w*px*0.6), Math.ceil(shape.eye.h*px*0.6));
+  }
+  // chest overlay
+  if(c.chest){
+    g.fillStyle = c.chest;
+    const cb = shape.body;
+    g.fillRect(Math.round((cb.x+1)*px), Math.round((cb.y+cb.h-3)*px), Math.ceil((cb.w-3)*px), Math.ceil(2*px));
+  }
+  // markings
+  if(b.marks) b.marks.forEach(m=>{
+    g.fillStyle = m.color;
+    g.fillRect(Math.round(m.x*px), Math.round(m.y*px), Math.ceil(m.w*px), Math.ceil(m.h*px));
+  });
+  g.restore();
+}
+
+// offscreen icon cache for journal thumbnails
+const iconCache = {};
+function getBirdIcon(b){
+  if(iconCache[b.id]) return iconCache[b.id];
+  const c = document.createElement('canvas');
+  c.width = 64; c.height = 64;
+  const g = c.getContext('2d');
+  g.imageSmoothingEnabled = false;
+  drawBird(g, b, 32, 34, 56, 0, true, 1);
+  iconCache[b.id] = c;
+  return c;
+}
+
+/* ============================== DAY / NIGHT CYCLE ============================== */
+const DAY_HOLD = 90*1000;
+const DUSK     = 300*1000;   // 5 minutes
+const NIGHT_HOLD = 90*1000;
+const DAWN     = 300*1000;   // 5 minutes
+const CYCLE = DAY_HOLD + DUSK + NIGHT_HOLD + DAWN;
+
+let cycleStart = 0;
+let adminFreezeT = null;   // admin only: holds the day/night cycle at this point (ms into the cycle) when not null
+let lastCycleIndex = -1;
+let sunsetX = 0.2, sunriseX = 0.8;
+let moonX = 0.5, moonY = 0.2;
+
+function getCycleState(now){
+  const t = adminFreezeT !== null ? adminFreezeT : (now - cycleStart) % CYCLE;
+  let darkness, glow=0, glowX=0.5, stage;
+  if(t < DAY_HOLD){ darkness=0; stage='day'; }
+  else if(t < DAY_HOLD+DUSK){
+    const p = (t-DAY_HOLD)/DUSK;
+    darkness = p; stage='dusk';
+    glow = Math.sin(p*Math.PI); glowX = sunsetX;
+  } else if(t < DAY_HOLD+DUSK+NIGHT_HOLD){
+    darkness=1; stage='night';
+  } else {
+    const p = (t-(DAY_HOLD+DUSK+NIGHT_HOLD))/DAWN;
+    darkness = 1-p; stage='dawn';
+    glow = Math.sin(p*Math.PI); glowX = sunriseX;
+  }
+  const cycleIndex = Math.floor((now-cycleStart)/CYCLE);
+  if(cycleIndex !== lastCycleIndex){
+    lastCycleIndex = cycleIndex;
+    sunsetX = 0.1 + Math.random()*0.8;
+    sunriseX = 0.1 + Math.random()*0.8;
+    moonX = 0.15 + Math.random()*0.7;
+    moonY = 0.1 + Math.random()*0.28;
+  }
+  return { darkness, glow, glowX, stage };
+}
+
+/* ============================== BIOMES ============================== */
+let currentBiome = 'forest';
+
+const BIOME_PERCHES = {
+  forest: [
+    {xPct:0.16, yPct:0.46},
+    {xPct:0.30, yPct:0.36},
+    {xPct:0.62, yPct:0.40},
+    {xPct:0.78, yPct:0.32},
+    {xPct:0.50, yPct:0.50}
+  ],
+  river: [
+    {xPct:0.14, yPct:0.79},
+    {xPct:0.34, yPct:0.82},
+    {xPct:0.58, yPct:0.78},
+    {xPct:0.82, yPct:0.81}
+  ],
+  field: [
+    {xPct:0.18, yPct:0.72},
+    {xPct:0.40, yPct:0.68},
+    {xPct:0.62, yPct:0.73},
+    {xPct:0.84, yPct:0.68}
+  ],
+  rainforest: [        // 11 jungle trees, all standing on the ground line, with canopies at different heights
+    {xPct:0.05, yPct:0.46},
+    {xPct:0.14, yPct:0.36},
+    {xPct:0.23, yPct:0.48},
+    {xPct:0.32, yPct:0.30},
+    {xPct:0.41, yPct:0.42},
+    {xPct:0.50, yPct:0.34},
+    {xPct:0.59, yPct:0.47},
+    {xPct:0.68, yPct:0.29},
+    {xPct:0.77, yPct:0.41},
+    {xPct:0.86, yPct:0.35},
+    {xPct:0.95, yPct:0.45}
+  ],
+  savannah: [          // 1st, 3rd and 5th are acacia trees, 2nd and 4th are cacti
+    {xPct:0.16, yPct:0.52},
+    {xPct:0.36, yPct:0.68},
+    {xPct:0.56, yPct:0.46},
+    {xPct:0.74, yPct:0.70},
+    {xPct:0.88, yPct:0.54}
+  ],
+  mountains: [         // stones of different sizes (a lower yPct = a bigger stone)
+    {xPct:0.16, yPct:0.74},
+    {xPct:0.40, yPct:0.78},
+    {xPct:0.66, yPct:0.76},
+    {xPct:0.88, yPct:0.775}
+  ],
+  coast: [             // driftwood posts standing on the sand
+    {xPct:0.14, yPct:0.70},
+    {xPct:0.32, yPct:0.66},
+    {xPct:0.54, yPct:0.72},
+    {xPct:0.74, yPct:0.68},
+    {xPct:0.90, yPct:0.71}
+  ]
+};
+
+const BIOME_GROUND = {
+  forest: ['#7fae52','#5e8a3e'],
+  field:  ['#c9b45a','#a68f3a'],
+  rainforest: ['#3f7a38','#2a5a2a'],
+  savannah: ['#d9b46a','#b88a42'],
+  mountains: ['#86907a','#5e6a56'],
+  coast: ['#e8d6a4','#c9b27a']
+};
+
+function lerpColor(a,b,t){
+  const ah = parseInt(a.slice(1),16), bh = parseInt(b.slice(1),16);
+  const ar=(ah>>16)&255, ag=(ah>>8)&255, ab=ah&255;
+  const br=(bh>>16)&255, bg=(bh>>8)&255, bb=bh&255;
+  const r=Math.round(ar+(br-ar)*t), g=Math.round(ag+(bg-ag)*t), bl=Math.round(ab+(bb-ab)*t);
+  return `rgb(${r},${g},${bl})`;
+}
+
+function drawTree(bx,by,groundY,d){
+  const trunkColor = lerpColor('#6b4a2c','#1c1410', d);
+  const leafColor = lerpColor('#4a7a34','#101c10', d);
+  const leafColor2 = lerpColor('#5c8f42','#152214', d);
+  const trunkW = 10, trunkTopY = by+18;
+  ctx.fillStyle = trunkColor;
+  ctx.fillRect(bx-trunkW/2, trunkTopY, trunkW, groundY-trunkTopY);
+  const blocks = [
+    {dx:-34,dy:-6,w:34,h:26},
+    {dx:-6,dy:-26,w:40,h:34},
+    {dx:20,dy:-2,w:30,h:24},
+    {dx:-16,dy:8,w:44,h:18}
+  ];
+  blocks.forEach((bl,i)=>{
+    ctx.fillStyle = i%2===0?leafColor:leafColor2;
+    ctx.fillRect(Math.round(bx+bl.dx), Math.round(by+bl.dy-30), bl.w, bl.h);
+  });
+  ctx.fillStyle = trunkColor;
+  ctx.fillRect(bx-30, by+2, 60, 4);
+}
+
+function drawReedClump(bx,by,d){
+  const reedColor = lerpColor('#4a7a34','#0e1a10', d);
+  const reedColor2 = lerpColor('#5c8f42','#122015', d);
+  for(let i=-3;i<=3;i++){
+    const h = 22+Math.abs(i)*5;
+    ctx.fillStyle = (i%2===0)?reedColor:reedColor2;
+    ctx.fillRect(bx+i*4-1, by-h, 3, h);
+  }
+}
+
+function drawFencePost(bx,by,groundY,d){
+  const woodColor = lerpColor('#8a6a4a','#26190e', d);
+  ctx.fillStyle = woodColor;
+  ctx.fillRect(bx-4, by-4, 8, (groundY+6)-(by-4));   // stands on the line
+  ctx.fillRect(bx-26, by-2, 52, 5);
+}
+
+function drawJungleTree(bx,by,groundY,d){
+  const trunkColor = lerpColor('#5a3e26','#17100a', d);
+  const leafColor  = lerpColor('#2f6a2c','#0b180c', d);
+  const leafColor2 = lerpColor('#3f8a38','#10200f', d);
+  const leafColor3 = lerpColor('#2a5a3a','#0c1a12', d);
+  const vineColor  = lerpColor('#4a8a3a','#0e1c10', d);
+  const trunkW = 14, trunkTopY = by+18;
+  ctx.fillStyle = trunkColor;
+  ctx.fillRect(bx-trunkW/2, trunkTopY, trunkW, groundY-trunkTopY);
+  ctx.fillRect(bx-trunkW/2-8, groundY-10, 8, 10);   // buttress roots
+  ctx.fillRect(bx+trunkW/2, groundY-10, 8, 10);
+  const blocks = [
+    {dx:-46,dy:-6,w:46,h:28},
+    {dx:-8,dy:-30,w:54,h:38},
+    {dx:28,dy:-4,w:42,h:26},
+    {dx:-22,dy:8,w:60,h:20}
+  ];
+  blocks.forEach((bl,i)=>{
+    ctx.fillStyle = i%3===0 ? leafColor : (i%3===1 ? leafColor2 : leafColor3);
+    ctx.fillRect(Math.round(bx+bl.dx), Math.round(by+bl.dy-30), bl.w, bl.h);
+  });
+  ctx.fillStyle = trunkColor;
+  ctx.fillRect(bx-34, by+2, 68, 4);
+  ctx.fillStyle = vineColor;                          // hanging vines
+  [-30,-14,18,34].forEach((vx,i)=> ctx.fillRect(bx+vx, by+6, 2, 26+((i*11)%22)));
+}
+
+const RAINFOREST_FERN_SPOTS = [
+  {xPct:0.06, yPct:0.84},
+  {xPct:0.24, yPct:0.88},
+  {xPct:0.44, yPct:0.84},
+  {xPct:0.64, yPct:0.89},
+  {xPct:0.80, yPct:0.84},
+  {xPct:0.95, yPct:0.88}
+];
+function drawFern(x,y,d){
+  const fern  = lerpColor('#3f8a38','#10200f', d);
+  const fern2 = lerpColor('#2f6a2c','#0b180c', d);
+  ctx.fillStyle = fern2;
+  ctx.fillRect(x-10, y-4, 8, 3);
+  ctx.fillRect(x+2, y-4, 8, 3);
+  ctx.fillStyle = fern;
+  ctx.fillRect(x-6, y-9, 5, 3);
+  ctx.fillRect(x+1, y-9, 5, 3);
+  ctx.fillRect(x-2, y-15, 4, 12);
+}
+
+/* ---- Forest flower patches (static decor; bees occasionally visit them) ---- */
+const FOREST_FLOWER_SPOTS = [
+  {xPct:0.10, yPct:0.78},
+  {xPct:0.36, yPct:0.83},
+  {xPct:0.55, yPct:0.77},
+  {xPct:0.70, yPct:0.85},
+  {xPct:0.90, yPct:0.79}
+];
+const FLOWER_COLOR_CHOICES = ['#e05a7a','#e8c93a','#c96ad9','#f2f2ea','#e8895a'];
+const FOREST_FLOWER_PALETTES = FOREST_FLOWER_SPOTS.map(()=>{
+  const shuffled = [...FLOWER_COLOR_CHOICES].sort(()=>Math.random()-0.5);
+  return shuffled.slice(0,3);
+});
+
+function drawFlower(x,y,color,d){
+  const stemColor = lerpColor('#3a6a2a','#0e1c10', d);
+  const petal = lerpColor(color, '#141014', d*0.5);
+  ctx.fillStyle = stemColor;
+  ctx.fillRect(x, y, 2, 10);
+  ctx.fillStyle = petal;
+  ctx.fillRect(x-3, y-6, 8, 3);
+  ctx.fillRect(x-1, y-9, 3, 8);
+  ctx.fillStyle = lerpColor('#e8d84a','#5a5024', d*0.5);
+  ctx.fillRect(x, y-6, 2, 2);
+}
+
+function drawFlowerPatch(bx,by,d,palette){
+  palette.forEach((c,i)=>{
+    const ox = (i-1)*10;
+    drawFlower(bx+ox, by-(i%2)*3, c, d);
+  });
+}
+
+function drawAcacia(bx,by,groundY,d){
+  const trunkColor = lerpColor('#6a4a2c','#1c1410', d);
+  const leafColor  = lerpColor('#7a8a3a','#141c10', d);
+  const leafColor2 = lerpColor('#8a9a46','#18220f', d);
+  ctx.fillStyle = trunkColor;
+  ctx.fillRect(bx-4, by+10, 8, groundY-(by+10));
+  ctx.fillRect(bx-18, by+10, 36, 4);
+  ctx.fillStyle = leafColor;
+  ctx.fillRect(bx-48, by+2, 96, 8);
+  ctx.fillStyle = leafColor2;
+  ctx.fillRect(bx-34, by+10, 68, 6);
+}
+
+function drawCactus(bx,by,groundY,d){
+  const cactus  = lerpColor('#4a8a4a','#0f1c10', d);
+  const cactus2 = lerpColor('#3a7a3a','#0b160c', d);
+  ctx.fillStyle = cactus;
+  ctx.fillRect(bx-6, by+2, 12, (groundY+10)-(by+2));
+  ctx.fillStyle = cactus2;
+  ctx.fillRect(bx-18, by+24, 6, 22);
+  ctx.fillRect(bx-18, by+42, 12, 5);
+  ctx.fillRect(bx+12, by+14, 6, 20);
+  ctx.fillRect(bx+6, by+30, 12, 5);
+}
+
+const SAVANNAH_TUFT_SPOTS = [
+  {xPct:0.07, yPct:0.86},
+  {xPct:0.22, yPct:0.90},
+  {xPct:0.45, yPct:0.85},
+  {xPct:0.60, yPct:0.91},
+  {xPct:0.80, yPct:0.86},
+  {xPct:0.94, yPct:0.90}
+];
+function drawDryTuft(x,y,d){
+  ctx.fillStyle = lerpColor('#c9a24a','#2a2412', d);
+  ctx.fillRect(x-6, y-6, 2, 6);
+  ctx.fillRect(x-2, y-11, 2, 11);
+  ctx.fillRect(x+2, y-8, 2, 8);
+  ctx.fillRect(x+6, y-5, 2, 5);
+}
+
+// Everything below is drawn on a pixel grid with flat colours, so it stays pixel art.
+// Far-off peaks: clean stair-stepped silhouettes, a darker right side and a snow cap.
+const MOUNTAIN_PEAKS = [      // back to front
+  {xPct:0.55, hPct:0.36, far:true},
+  {xPct:0.15, hPct:0.28, far:false},
+  {xPct:0.90, hPct:0.24, far:false}
+];
+function drawPeak(cx,baseY,h,far,d){
+  const P = 20;                                  // big chunky pixels, so the mountains are made of far fewer of them
+  cx = Math.round(cx/P)*P;
+  baseY = Math.round(baseY/P)*P;
+  ctx.save();
+  ctx.globalAlpha = 0.5;                         // half see-through so they sit back in the haze
+  const rock      = lerpColor(far ? '#aab6c8' : '#98a5b8', far ? '#1a2030' : '#161c2a', d);
+  const shade     = lerpColor(far ? '#98a5b8' : '#8693a8', far ? '#161c2a' : '#121826', d);
+  const snow      = lerpColor('#f4f6fa','#566078', d);
+  const snowShade = lerpColor('#d6dde8','#444e66', d);
+  const rows = Math.max(4, Math.round(h/P));
+  const snowRows = Math.max(2, Math.round(rows*0.28));
+  for(let i=0;i<rows;i++){
+    const y = baseY-(i+1)*P;
+    const fromTop = rows-1-i;
+    const hw = fromTop*P + P;                   // each row steps out by 1 pixel per side
+    const isSnow = fromTop < snowRows;
+    const jag = fromTop === snowRows-1;         // ragged lower edge of the snow
+    for(let k=-hw/P; k<hw/P; k++){
+      if(jag && (k%2!==0)) continue;
+      ctx.fillStyle = k<0 ? (isSnow ? snow : rock) : (isSnow ? snowShade : shade);
+      ctx.fillRect(cx+k*P, y, P, P);
+    }
+  }
+  ctx.restore();
+}
+
+// Stones: stepped pixel domes of different sizes (the bigger ones are perches for birds).
+function drawStone(cx,topY,baseY,d){
+  const P = 4;
+  cx = Math.round(cx/P)*P; topY = Math.round(topY/P)*P; baseY = Math.round(baseY/P)*P;
+  const light = lerpColor('#b4ab9c','#2c2a32', d);
+  const mid   = lerpColor('#968d80','#201e26', d);
+  const dark  = lerpColor('#746c62','#17151c', d);
+  const rows = Math.max(2, Math.round((baseY-topY)/P));
+  const maxW = Math.max(4*P, Math.round((baseY-topY)*2.2/(2*P))*2*P);
+  for(let i=0;i<rows;i++){
+    const y = topY+i*P;
+    const w = Math.max(4*P, Math.round(maxW*Math.sqrt((i+1)/rows)/(2*P))*2*P);
+    ctx.fillStyle = i===0 ? light : mid;
+    ctx.fillRect(cx-w/2, y, w, P);
+    if(i>0){
+      ctx.fillStyle = light; ctx.fillRect(cx-w/2, y, P, P);          // lit left edge
+      ctx.fillStyle = dark;  ctx.fillRect(cx+w/2-2*P, y, 2*P, P);    // shaded right side
+    }
+  }
+}
+
+const MOUNTAIN_FRONT_SPOTS = [   // h = stone height in px, no h = grass tuft
+  {xPct:0.06, yPct:0.88, h:14},
+  {xPct:0.26, yPct:0.91},
+  {xPct:0.47, yPct:0.89, h:22},
+  {xPct:0.53, yPct:0.92, h:10},
+  {xPct:0.80, yPct:0.90},
+  {xPct:0.93, yPct:0.89, h:16}
+];
+function drawAlpineTuft(x,y,d){
+  ctx.fillStyle = lerpColor('#6f8f4a','#10200f', d);
+  ctx.fillRect(x-6, y-5, 2, 5);
+  ctx.fillRect(x-2, y-9, 2, 9);
+  ctx.fillRect(x+2, y-7, 2, 7);
+  ctx.fillRect(x+6, y-4, 2, 4);
+}
+
+// Big ferns and bushes standing on the ground line, like the trees (walking birds pass in front of them).
+const RAINFOREST_BOTTOM = [
+  {xPct:0.03, w:230},
+  {xPct:0.12, fern:true},
+  {xPct:0.22, fern:true},
+  {xPct:0.31, w:300},
+  {xPct:0.43, fern:true},
+  {xPct:0.54, w:88},
+  {xPct:0.63, fern:true},
+  {xPct:0.73, fern:true},
+  {xPct:0.82, w:260},
+  {xPct:0.92, fern:true},
+  {xPct:0.99, w:80}
+];
+function drawBigFern(x,y,P,d){
+  x = Math.round(x/P)*P; y = Math.round(y/P)*P;
+  const c1 = lerpColor('#2f7a30','#0b1a0c', d);
+  const c2 = lerpColor('#3f9a3c','#10240f', d);
+  const c3 = lerpColor('#58b84c','#17301a', d);
+  const low  = [[-1,0],[-2,-1],[-3,-2],[-4,-2],[-5,-1],[-6,0]];      // fronds that arch out and droop
+  const mid  = [[-1,-1],[-1,-2],[-2,-3],[-3,-4],[-4,-4],[-5,-3]];
+  const tall = [[0,-1],[0,-2],[0,-3],[0,-4],[0,-5],[0,-6]];
+  const fronds = [low, mid, tall, mid.map(([a,b])=>[-a,b]), low.map(([a,b])=>[-a,b])];
+  fronds.forEach((f,fi)=> f.forEach(([px,py],i)=>{
+    ctx.fillStyle = (i+fi)%3===0 ? c3 : ((i+fi)%3===1 ? c2 : c1);
+    ctx.fillRect(x+px*P-P, y+py*P-P, 2*P, P);
+  }));
+  ctx.fillStyle = c1;
+  ctx.fillRect(x-P, y-P, 2*P, P);
+}
+function drawBush(x,y,w,d){
+  const P = 8;
+  x = Math.round(x/P)*P; y = Math.round(y/P)*P;
+  const dark  = lerpColor('#27602a','#0a160b', d);
+  const mid   = lerpColor('#357a35','#0e1f0e', d);
+  const light = lerpColor('#4c9a42','#142a14', d);
+  const n = Math.max(4, Math.round(w/28));                           // wider bushes are taller too
+  const rowW = [];
+  for(let i=0;i<n;i++){                                              // stepped, rounded mound
+    const f = Math.max(0.3, Math.sqrt(1 - Math.pow(i/n, 2)));
+    rowW.push(Math.max(2*P, Math.round(w*f/(2*P))*2*P));
+    ctx.fillStyle = i===0 ? dark : (i===n-1 ? light : mid);
+    ctx.fillRect(x-rowW[i]/2, y-(i+1)*P, rowW[i], P);
+  }
+  const flowerCount = Math.max(2, Math.round(w/45));
+  for(let k=0;k<flowerCount;k++){                                    // leaf highlights and tropical flowers
+    const r = 1 + (k*5)%Math.max(1, n-2);
+    const half = rowW[r]/2 - 2*P;
+    const px = Math.round((x + ((((k*37)+Math.round(x/P)*11)%100)/100 - 0.5)*2*half)/P)*P;
+    const py = y-(r+1)*P;
+    ctx.fillStyle = light;
+    ctx.fillRect(px - P, py, P, P);
+    ctx.fillStyle = k%2===0 ? lerpColor('#e0452f','#3a1210', d) : lerpColor('#f0c93a','#3a3010', d);
+    ctx.fillRect(px + 2, py + 2, P/2, P/2);
+  }
+}
+
+/* ============================== COAST SCENERY ============================== */
+// The sea fills the band between the horizon and the beach, with moving waves and foam that roll up the
+// sand as the tide comes in and out. Everything is flat-colour pixel blocks like the rest of the game.
+function drawSea(groundY, d, now){
+  const top = H*0.50;
+  const tide = Math.sin(now*0.00035)*6;                    // the water creeps up and down the beach
+  const bottom = groundY + tide;
+  const c1 = mixRgb(lerpColor('#86c4e2','#0d1d40', d), lerpColor('#8aa0b4','#0c1626', d), rainAmount*0.7);
+  const c2 = mixRgb(lerpColor('#2f7fb0','#08142c', d), lerpColor('#4d6a84','#08101e', d), rainAmount*0.7);
+  const g = ctx.createLinearGradient(0, top, 0, bottom);
+  g.addColorStop(0, c1); g.addColorStop(1, c2);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, top, W, bottom-top);
+  ctx.fillStyle = lerpColor('#c8e8f4','#1a2c50', d);
+  ctx.fillRect(0, top, W, 2);                              // horizon line
+  const rows = 9, span = bottom-top-26;
+  for(let r=0;r<rows;r++){                                 // wave streaks drifting towards the shore
+    const y = top + 16 + r*(span/rows);
+    ctx.fillStyle = `rgba(255,255,255,${(0.10 + r*0.03)*(1-0.7*d)})`;
+    for(let i=0;i<5;i++){
+      const x = ((i*(W/5) + now*(0.010 + r*0.0045) + r*53) % (W+120)) - 60;
+      ctx.fillRect(Math.round(x), Math.round(y), 18 + r*5, 2);
+    }
+  }
+  ctx.fillStyle = 'rgba(90,70,40,0.25)';                   // wet sand
+  ctx.fillRect(0, bottom, W, 8);
+  for(let x=0;x<W;x+=12){                                  // foam line
+    const ph = Math.sin(now*0.0018 + x*0.03);
+    ctx.fillStyle = `rgba(255,255,255,${0.9*(1-0.5*d)})`;
+    ctx.fillRect(x, Math.round(bottom - 6 + ph*3), 12, 5);
+    ctx.fillStyle = `rgba(255,255,255,${0.45*(1-0.5*d)})`;
+    ctx.fillRect(x, Math.round(bottom - 14 + Math.sin(now*0.0018 + x*0.03 + 1.5)*3), 12, 3);
+  }
+}
+
+function drawLighthouse(d, now){
+  const P = 6, x = Math.round(W*0.86/P)*P, base = Math.round(H*0.62/P)*P;
+  const rock1 = lerpColor('#7a7468','#1c1a20', d), rock2 = lerpColor('#5e584e','#14121a', d);
+  [[64,0],[52,1],[36,2]].forEach(([w,i])=>{                // small rocky island
+    ctx.fillStyle = i===1 ? rock2 : rock1;
+    ctx.fillRect(x-w/2, base-(i+1)*P, w, P);
+  });
+  const towerTop = base - 3*P - Math.round(H*0.17/P)*P;
+  const white = lerpColor('#f2f0e8','#4a4e60', d), red = lerpColor('#c9302f','#3a1216', d);
+  for(let y=base-3*P, k=0; y>towerTop; y-=2*P, k++){       // red and white stripes
+    ctx.fillStyle = k%2===0 ? white : red;
+    ctx.fillRect(x-9+Math.min(k,3), y-2*P, 18-2*Math.min(k,3), 2*P);
+  }
+  const lanternY = towerTop - 2*P;
+  ctx.fillStyle = lerpColor('#3a3a42','#101018', d);
+  ctx.fillRect(x-12, towerTop-3, 24, 3);                   // gallery
+  ctx.fillStyle = d > 0.4 ? '#ffe9a0' : lerpColor('#e8d8a0','#ffe9a0', d);
+  ctx.fillRect(x-6, lanternY, 12, 2*P);                    // lantern room
+  ctx.fillStyle = lerpColor('#8a2a2a','#2a0e10', d);
+  ctx.fillRect(x-8, lanternY-6, 16, 6);
+  ctx.fillRect(x-4, lanternY-12, 8, 6);                    // roof
+  if(d > 0.3){                                             // at night the lamp glows and a beam sweeps the sea
+    const gl = ctx.createRadialGradient(x, lanternY+P, 0, x, lanternY+P, 46);
+    gl.addColorStop(0, `rgba(255,236,150,${0.55*d})`); gl.addColorStop(1, 'rgba(255,236,150,0)');
+    ctx.fillStyle = gl; ctx.fillRect(x-46, lanternY+P-46, 92, 92);
+    const sw = Math.sin(now*0.0007), len = W*0.7*Math.abs(sw), side = sw >= 0 ? 1 : -1;
+    ctx.fillStyle = `rgba(255,240,170,${0.16*d})`;
+    ctx.beginPath(); ctx.moveTo(x, lanternY+P); ctx.lineTo(x + side*len, lanternY+P-18); ctx.lineTo(x + side*len, lanternY+P+18); ctx.closePath(); ctx.fill();
+  }
+}
+
+function drawDriftPost(bx, by, groundY, d){
+  const wood  = lerpColor('#7a5a3a','#1c1410', d);
+  const shade = lerpColor('#5e442c','#140e0a', d);
+  const top   = lerpColor('#a8845a','#2a2018', d);
+  const rope  = lerpColor('#c9b28a','#3a3224', d);
+  ctx.fillStyle = wood;
+  ctx.fillRect(bx-5, by, 10, (groundY+8)-by);            // stands on the line
+  ctx.fillStyle = shade;
+  ctx.fillRect(bx+1, by, 4, (groundY+8)-by);
+  ctx.fillStyle = top;
+  ctx.fillRect(bx-7, by-2, 14, 4);                         // flat weathered top to perch on
+  ctx.fillStyle = rope;
+  ctx.fillRect(bx-5, by+14, 10, 3);
+}
+
+const COAST_FRONT_SPOTS = [
+  {xPct:0.06, yPct:0.90, kind:'grass'},
+  {xPct:0.20, yPct:0.93, kind:'shell'},
+  {xPct:0.36, yPct:0.89, kind:'stone', h:14},
+  {xPct:0.49, yPct:0.92, kind:'star'},
+  {xPct:0.64, yPct:0.90, kind:'grass'},
+  {xPct:0.79, yPct:0.94, kind:'stone', h:10},
+  {xPct:0.92, yPct:0.91, kind:'shell'}
+];
+function drawShell(x,y,d){
+  ctx.fillStyle = lerpColor('#f0b8b8','#4a3030', d);
+  ctx.fillRect(x-5, y-4, 10, 4); ctx.fillRect(x-3, y-6, 6, 2);
+  ctx.fillStyle = lerpColor('#d98a8a','#3a2020', d);
+  ctx.fillRect(x-1, y-5, 2, 5);
+}
+function drawStarfish(x,y,d){
+  ctx.fillStyle = lerpColor('#e0603a','#4a1e12', d);
+  ctx.fillRect(x-7, y-4, 14, 3); ctx.fillRect(x-2, y-9, 4, 12);
+  ctx.fillRect(x-6, y-8, 3, 3); ctx.fillRect(x+3, y-8, 3, 3);
+}
+
+// ---- shoreline wildlife (coast only): crabs on the sand; seals, jumping fish and a boat on the sea ----
+let coastCrabs = [], coastSeals = [], coastFish = [], coastBoat = null;
+let coastActive = false, coastCrabTimer = 1500, coastFishTimer = 3000, coastBoatTimer = 30000;
+
+function spawnCrab(onscreen){
+  const dir = Math.random()<0.5 ? 1 : -1;
+  coastCrabs.push({
+    x: onscreen ? W*(0.1+Math.random()*0.8) : (dir>0 ? -30 : W+30),
+    y: H*0.80 + 16 + Math.random()*H*0.13,
+    dir, seed:Math.random()*1000, age:0, state:'pause', t:200+Math.random()*900, leaving:false, dead:false
+  });
+}
+
+function stepCoastLife(dt, cycle){
+  if(currentBiome !== 'coast'){ coastCrabs.length = 0; coastSeals.length = 0; coastFish.length = 0; coastBoat = null; coastActive = false; return; }
+  const first = !coastActive;
+  coastActive = true;
+  if(first){
+    for(let i=0;i<2;i++) coastSeals.push({ state:'down', t:1500 + i*3500 + Math.random()*2500, up:0, x:0, y:0, dir:1, seed:Math.random()*1000 });
+    for(let i=0;i<2;i++) spawnCrab(true);
+    coastBoat = { x: W*(0.15+Math.random()*0.7), dir: Math.random()<0.5?1:-1, speed: 0.012 };
+  }
+
+  coastCrabs.forEach(c=>{                                      // crabs scuttle sideways in bursts
+    c.age += dt;
+    if(c.age > 80000 && !c.leaving){ c.leaving = true; c.dir = c.x < W/2 ? -1 : 1; }
+    if(c.state === 'pause'){
+      c.t -= dt;
+      if(c.t <= 0){
+        c.state = 'run'; c.t = 200 + Math.random()*500;
+        if(c.leaving) c.dir = c.x < W/2 ? -1 : 1;
+        else if(Math.random() < 0.4) c.dir *= -1;
+      }
+    } else {
+      c.x += c.dir*0.14*dt; c.t -= dt;
+      if(c.t <= 0){ c.state = 'pause'; c.t = c.leaving ? 50 : 500 + Math.random()*1800; }
+    }
+    if(c.x < -60 || c.x > W+60) c.dead = true;
+  });
+  coastCrabs = coastCrabs.filter(c=> !c.dead);
+  coastCrabTimer -= dt;
+  if(coastCrabTimer <= 0){
+    coastCrabTimer = 2000 + Math.random()*3000;
+    if(coastCrabs.length < 6) spawnCrab(false);
+  }
+
+  coastSeals.forEach(sl=>{                                     // seals pop their heads up now and then
+    sl.t -= dt;
+    if(sl.state === 'down'){
+      if(sl.t <= 0){
+        sl.state = 'up'; sl.t = 3500 + Math.random()*2500; sl.up = 0;
+        sl.x = W*(0.1 + Math.random()*0.8); sl.y = H*(0.57 + Math.random()*0.14); sl.dir = Math.random()<0.5 ? 1 : -1;
+      }
+    } else {
+      sl.up += dt;
+      if(sl.t <= 0){ sl.state = 'down'; sl.t = 8000 + Math.random()*8000; }
+    }
+  });
+
+  coastFish.forEach(f=>{ f.t += dt; });
+  coastFish = coastFish.filter(f=> f.t < f.dur);
+  coastFishTimer -= dt;
+  if(coastFishTimer <= 0){
+    coastFishTimer = 3500 + Math.random()*4500;
+    coastFish.push({ x:W*(0.1+Math.random()*0.8), y:H*(0.58 + Math.random()*0.14), dir:Math.random()<0.5?1:-1, t:0, dur:750, h:22+Math.random()*12 });
+  }
+
+  if(coastBoat){
+    coastBoat.x += coastBoat.dir*coastBoat.speed*dt;
+    if(coastBoat.x < -60 || coastBoat.x > W+60){ coastBoat = null; coastBoatTimer = 30000 + Math.random()*40000; }
+  } else {
+    coastBoatTimer -= dt;
+    if(coastBoatTimer <= 0){
+      const dir = Math.random()<0.5 ? 1 : -1;
+      coastBoat = { x: dir>0 ? -50 : W+50, dir, speed: 0.012 };
+    }
+  }
+}
+
+function drawCoastSeaLife(now, d){
+  if(currentBiome !== 'coast') return;
+  if(coastBoat){                                               // a distant sailing boat on the horizon
+    const x = Math.round(coastBoat.x), y = Math.round(H*0.50 + 12);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(coastBoat.dir, 1);
+    ctx.fillStyle = lerpColor('#6a4a30','#1a120c', d); ctx.fillRect(-14,-4,28,4); ctx.fillRect(-10,0,20,2);
+    ctx.fillStyle = lerpColor('#c9302f','#3a1010', d); ctx.fillRect(-14,-5,28,1);
+    ctx.fillStyle = lerpColor('#4a3a2a','#120e0a', d); ctx.fillRect(0,-26,2,22);
+    ctx.fillStyle = lerpColor('#f2f2ea','#5a6078', d);
+    [3,5,7,9,11,13,14,16].forEach((w,i)=> ctx.fillRect(2, -26+i*3, w, 3));
+    ctx.fillStyle = '#d93a3a'; ctx.fillRect(1,-28,5,2);
+    if(d > 0.4){ ctx.fillStyle = '#ffd870'; ctx.fillRect(-1,-30,3,3); }
+    ctx.restore();
+  }
+  coastSeals.forEach(sl=>{
+    if(sl.state !== 'up') return;
+    const rise = Math.min(1, sl.up/700), fall = Math.min(1, sl.t/700);   // rises out of the water, then sinks back
+    const lift = (1 - Math.min(rise, fall))*12;
+    const x = Math.round(sl.x), water = Math.round(sl.y + 4);
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.fillRect(x-16, water, 32, 2); ctx.fillRect(x-10, water+3, 20, 2);
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 0, W, water); ctx.clip();
+    ctx.translate(x, Math.round(sl.y + Math.sin(now*0.003+sl.seed)*1.5 + lift));
+    ctx.scale(sl.dir, 1);
+    ctx.fillStyle = '#6a6e78'; ctx.fillRect(-8,-6,16,10);
+    ctx.fillStyle = '#7e828c'; ctx.fillRect(3,-3,7,6);
+    ctx.fillStyle = '#12100c'; ctx.fillRect(0,-3,2,2); ctx.fillRect(8,-2,2,2);
+    ctx.fillStyle = '#d8d8d8'; ctx.fillRect(8,1,5,1); ctx.fillRect(8,3,4,1);
+    ctx.restore();
+  });
+  coastFish.forEach(f=>{                                       // fish leap out of the sea
+    const p = f.t/f.dur;
+    const sx = Math.round(f.x), ex = Math.round(f.x + f.dir*46), sy = Math.round(f.y);
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    if(p < 0.2){ ctx.fillRect(sx-5, sy-2, 3, 3); ctx.fillRect(sx+3, sy-3, 3, 3); }
+    if(p > 0.8){ ctx.fillRect(ex-5, sy-2, 3, 3); ctx.fillRect(ex+3, sy-3, 3, 3); }
+    if(p > 0 && p < 1){
+      const fx = Math.round(f.x + f.dir*46*p), fy = Math.round(f.y - Math.sin(p*Math.PI)*f.h);
+      ctx.fillStyle = '#c8d4e0'; ctx.fillRect(fx-5, fy-2, 10, 4);
+      ctx.fillStyle = '#9fb0c4'; ctx.fillRect(fx - f.dir*8, fy-3, 3, 6);
+      ctx.fillStyle = '#1a1208'; ctx.fillRect(fx + f.dir*3, fy-1, 1, 1);
+    }
+  });
+}
+
+function drawCrab(c, now){
+  const x = Math.round(c.x), y = Math.round(c.y);
+  const wave = Math.sin(now*0.01 + c.seed) > 0 ? 3 : 0;      // claws wave while it rests
+  const step = c.state === 'run' ? Math.floor(now/70 + c.seed)%2 : 0;
+  ctx.fillStyle = '#d9552f'; ctx.fillRect(x-6,y-6,12,5);
+  ctx.fillStyle = '#e8704a'; ctx.fillRect(x-5,y-7,10,2);
+  ctx.fillRect(x-4,y-9,2,3); ctx.fillRect(x+2,y-9,2,3);        // eye stalks
+  ctx.fillStyle = '#12100c'; ctx.fillRect(x-4,y-10,2,2); ctx.fillRect(x+2,y-10,2,2);
+  ctx.fillStyle = '#d9552f';
+  ctx.fillRect(x-10,y-8-(c.state==='pause'?wave:0),4,4);       // claws
+  ctx.fillRect(x+6,y-8-(c.state==='pause'?(3-wave):0),4,4);
+  ctx.fillRect(x-8,y-6,2,3); ctx.fillRect(x+6,y-6,2,3);
+  ctx.fillStyle = '#b8431f';
+  ctx.fillRect(x-8,y-2+step,3,2); ctx.fillRect(x-4,y-1-step,3,2); ctx.fillRect(x+1,y-2+step,3,2); ctx.fillRect(x+5,y-1-step,3,2);
+}
+function drawCoastGround(now){
+  if(currentBiome !== 'coast') return;
+  coastCrabs.slice().sort((a,b)=> a.y-b.y).forEach(c=> drawCrab(c, now));
+}
+
+function drawSplash(inst, now){                                  // the splash when a plunge-diving bird hits the water
+  const e = now - inst.spawnAt - inst.splash.t;
+  if(e < 0 || e > 800) return;
+  const k = e/800, a = 1-k, x = inst.splash.x, y = inst.splash.y;
+  ctx.fillStyle = `rgba(240,248,255,${0.9*a})`;
+  for(let i=-3;i<=3;i++){
+    const dx = i*(6 + k*10);
+    const dy = -Math.sin(Math.min(1,k*1.4)*Math.PI)*(24 - Math.abs(i)*5);
+    ctx.fillRect(Math.round(x+dx), Math.round(y+dy), 3, 3);
+  }
+  const rw = 10 + k*40;
+  ctx.fillStyle = `rgba(255,255,255,${0.5*a})`;
+  ctx.fillRect(Math.round(x-rw), Math.round(y), Math.round(rw*2), 2);
+}
+
+const BIOME_DECOR = {
+  forest: (groundY,d)=>{
+    BIOME_PERCHES.forest.forEach(p=> drawTree(p.xPct*W, p.yPct*H, groundY, d));
+  },
+  field:  (groundY,d)=> BIOME_PERCHES.field.forEach(p=> drawFencePost(p.xPct*W, p.yPct*H, groundY, d)),   // posts stand on the line, so hares run in front of them
+  river:  (groundY,d)=> BIOME_PERCHES.river.forEach(p=> drawReedClump(p.xPct*W, p.yPct*H, d)),
+  rainforest: (groundY,d)=>{
+    BIOME_PERCHES.rainforest.forEach(p=> drawJungleTree(p.xPct*W, p.yPct*H, groundY, d));
+    RAINFOREST_BOTTOM.forEach(p=> p.fern ? drawBigFern(p.xPct*W, groundY+4, 8, d) : drawBush(p.xPct*W, groundY+6, p.w, d));   // on the line, in front of the trunks
+  },
+  savannah: (groundY,d)=> BIOME_PERCHES.savannah.forEach((p,i)=>{ if(i%2===0) drawAcacia(p.xPct*W, p.yPct*H, groundY, d); }),
+  coast: (groundY,d)=>{
+    drawSea(groundY, d, gameClock);
+    drawCoastSeaLife(gameClock, d);
+    drawLighthouse(d, gameClock);
+    BIOME_PERCHES.coast.forEach(p=> drawDriftPost(p.xPct*W, p.yPct*H, groundY, d));
+  },
+  mountains: (groundY,d)=>{
+    MOUNTAIN_PEAKS.forEach(pk=> drawPeak(pk.xPct*W, groundY, pk.hPct*H, pk.far, d));
+    BIOME_PERCHES.mountains.forEach(p=> drawStone(p.xPct*W, p.yPct*H+2, groundY+6, d));
+  }
+};
+
+// Birds drawn in drawScene (so they can be hidden by foreground objects): walkers everywhere, and
+// every bird in the Mountains, where the stones should hide any bird that is behind them.
+function birdDrawnBehindFront(inst){ return !!inst.species.walks || currentBiome === 'mountains'; }
+
+function coastSeaY(){ return H*0.64; }   // the sea surface a plunge-diving bird goes into
+
+function drawBirdInst(inst, pos, now){
+  if(pos.clip){                            // below the water line: only the part above the surface shows
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 0, W, coastSeaY()); ctx.clip();
+    drawBirdInst(inst, Object.assign({}, pos, {clip:false}), now);
+    ctx.restore();
+    return;
+  }
+  const flap = inst.species.walks ? 0 : (now - inst.spawnAt)*0.012;
+  if(pos.fast){
+    // diving / rocketing across: tuck the wings and point the bird along its path
+    ctx.save();
+    ctx.translate(pos.x, pos.y);
+    ctx.rotate(inst.facingRight ? pos.ang : pos.ang - Math.PI);
+    ctx.translate(-pos.x, -pos.y);
+    drawBird(ctx, inst.species, pos.x, pos.y, inst.species.size, 0, inst.facingRight, 1);
+    ctx.restore();
+  } else {
+    drawBird(ctx, inst.species, pos.x, pos.y, inst.species.size, flap, inst.facingRight, 1);
+  }
+}
+
+// Foreground objects: drawn AFTER the walking (flightless) birds, so those birds pass behind them.
+// Things standing right on the walking line (trees) stay in BIOME_DECOR above, behind the walkers.
+const BIOME_DECOR_FRONT = {
+  forest: (groundY,d)=> FOREST_FLOWER_SPOTS.forEach((p,i)=> drawFlowerPatch(p.xPct*W, p.yPct*H, d, FOREST_FLOWER_PALETTES[i])),   // below the line: animals go behind
+  rainforest: (groundY,d)=> RAINFOREST_FERN_SPOTS.forEach(p=> drawFern(p.xPct*W, p.yPct*H, d)),
+  savannah: (groundY,d)=>{
+    BIOME_PERCHES.savannah.forEach((p,i)=>{ if(i%2===1) drawCactus(p.xPct*W, p.yPct*H, groundY, d); });
+    SAVANNAH_TUFT_SPOTS.forEach(p=> drawDryTuft(p.xPct*W, p.yPct*H, d));
+  },
+  coast: (groundY,d)=> COAST_FRONT_SPOTS.forEach(p=>{
+    const x = Math.round(p.xPct*W), y = Math.round(p.yPct*H);
+    if(p.kind === 'stone') drawStone(x, y-p.h, y, d);
+    else if(p.kind === 'shell') drawShell(x, y, d);
+    else if(p.kind === 'star') drawStarfish(x, y, d);
+    else drawAlpineTuft(x, y, d);
+  }),
+  mountains: (groundY,d)=> MOUNTAIN_FRONT_SPOTS.forEach(p=>{ const x=p.xPct*W, y=p.yPct*H; if(p.h) drawStone(x, y-p.h, y, d); else drawAlpineTuft(x, y, d); })
+};
+
+let stars = [];
+function makeStars(){
+  stars = [];
+  for(let i=0;i<90;i++){
+    stars.push({ x:Math.random(), y:Math.random()*0.55, tw:Math.random()*Math.PI*2, r: Math.random()<0.15?2:1 });
+  }
+}
+makeStars();
+
+/* ============================== WEATHER ============================== */
+// Every now and again it rains for a few minutes: the sky turns grey, the clouds darken and rain fills
+// the screen. It only changes how things look; spawn rates are not affected.
+let rainAmount = 0;          // 0 = clear, 1 = full rain (eases in and out)
+let rainTarget = 0;
+let nextRainAt = 0, rainEndsAt = 0;
+let weatherLastNow = null;
+let adminRain = null;        // Creative Mode: null = natural rain, true = rain held on, false = rain held off
+let rainPrevNow = 0;
+const RAIN_MAX = 240;
+let rainDrops = [];
+
+function mixRgb(a,b,t){      // blend two 'rgb(r,g,b)' strings (lerpColor returns these)
+  const pa = a.match(/\d+/g).map(Number), pb = b.match(/\d+/g).map(Number);
+  return `rgb(${Math.round(pa[0]+(pb[0]-pa[0])*t)},${Math.round(pa[1]+(pb[1]-pa[1])*t)},${Math.round(pa[2]+(pb[2]-pa[2])*t)})`;
+}
+
+function updateWeather(now){
+  if(weatherLastNow === null || now < weatherLastNow){      // a new game: the clock restarted
+    nextRainAt = now + 300000 + Math.random()*600000;       // first rain 5 to 15 minutes in
+    rainTarget = 0; rainAmount = 0; rainEndsAt = 0;
+  }
+  const dt = weatherLastNow === null ? 0 : Math.min(100, now - weatherLastNow);
+  weatherLastNow = now;
+  const before = rainTarget;
+  if(adminRain !== null){
+    rainTarget = adminRain ? 1 : 0;                         // Creative Mode override
+  } else if(rainTarget === 0 && now >= nextRainAt){
+    rainTarget = 1;
+    rainEndsAt = now + 120000 + Math.random()*120000;       // rains for 2 to 4 minutes
+  } else if(rainTarget === 1 && now >= rainEndsAt){
+    rainTarget = 0;
+    nextRainAt = now + 480000 + Math.random()*720000;      // next one 8 to 20 minutes later
+  }
+  const step = dt/8000;                                     // takes about 8 seconds to fade in or out
+  if(rainAmount < rainTarget) rainAmount = Math.min(rainTarget, rainAmount + step);
+  else if(rainAmount > rainTarget) rainAmount = Math.max(rainTarget, rainAmount - step);
+  if(before !== rainTarget && typeof refreshAdminSettingsUI === 'function') refreshAdminSettingsUI();
+}
+
+function resetRainDrop(r, anywhere){
+  const groundY = H*0.80;
+  r.speed = 0.8 + Math.random()*0.5;                        // px per ms
+  r.len = 10 + Math.floor(Math.random()*9);
+  r.x = Math.random()*(W+120) - 60;
+  r.y = anywhere ? Math.random()*H : -r.len - Math.random()*H*0.3;
+  r.landY = groundY - 4 + Math.random()*(H-groundY);        // where it hits the ground / water
+  r.slant = -0.05*r.speed;
+  r.splash = 0;
+}
+
+function drawWeather(now){
+  const dt = Math.min(64, Math.max(0, now - rainPrevNow));
+  rainPrevNow = now;
+  if(rainAmount <= 0.001) return;
+  if(rainDrops.length === 0){
+    for(let i=0;i<RAIN_MAX;i++){ const r = {}; resetRainDrop(r, true); rainDrops.push(r); }
+  }
+  ctx.fillStyle = `rgba(28,36,52,${0.22*rainAmount})`;      // cool, dim light over the whole scene
+  ctx.fillRect(0,0,W,H);
+  const count = Math.ceil(RAIN_MAX*rainAmount);
+  ctx.fillStyle = 'rgba(200,220,240,0.6)';
+  for(let i=0;i<count;i++){
+    const r = rainDrops[i];
+    if(r.splash > 0){
+      r.splash -= dt;
+      const lx = Math.round(r.x), ly = Math.round(r.landY);
+      ctx.fillRect(lx-4, ly, 2, 2);
+      ctx.fillRect(lx+3, ly, 2, 2);
+      ctx.fillRect(lx-1, ly-2, 2, 2);
+      if(r.splash <= 0) resetRainDrop(r, false);
+      continue;
+    }
+    r.y += r.speed*dt;
+    r.x += r.slant*dt;
+    if(r.y >= r.landY){ r.y = r.landY; r.splash = 140; continue; }
+    ctx.fillRect(Math.round(r.x), Math.round(r.y), 2, r.len);
+  }
+}
+
+function drawScene(now, cycle){
+  updateWeather(now);
+  const d = cycle.darkness;
+  // sky gradient
+  const topDay='#7EC8E3', horDay='#CFEFE6';
+  const topNight='#0a0f28', horNight='#1b2a55';
+  const top = mixRgb(lerpColor(topDay, topNight, d), lerpColor('#7a8591','#0c111c', d), rainAmount*0.9);   // grey when raining
+  const hor = mixRgb(lerpColor(horDay, horNight, d), lerpColor('#a9b2ba','#161e30', d), rainAmount*0.9);
+  const g = ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0, top);
+  g.addColorStop(1, hor);
+  ctx.fillStyle = g;
+  ctx.fillRect(0,0,W,H);
+
+  // glow (sunrise/sunset light, no sun disc drawn)
+  const glowA = cycle.glow*(1-rainAmount);   // no sunrise / sunset glow through the rain clouds
+  if(glowA > 0.01){
+    const gx = cycle.glowX*W;
+    const gy = H*0.62;
+    const rg = ctx.createRadialGradient(gx,gy,0, gx,gy, W*0.5);
+    rg.addColorStop(0, `rgba(255,150,90,${0.35*glowA})`);
+    rg.addColorStop(0.5, `rgba(255,190,120,${0.16*glowA})`);
+    rg.addColorStop(1, 'rgba(255,190,120,0)');
+    ctx.fillStyle = rg;
+    ctx.fillRect(0,0,W,H);
+  }
+
+  // stars
+  if(d > 0.15){
+    ctx.save();
+    ctx.globalAlpha = Math.min(1,(d-0.15)/0.5) * (1-rainAmount*0.9);
+    stars.forEach(s=>{
+      const tw = 0.5+0.5*Math.sin(now*0.002 + s.tw);
+      ctx.fillStyle = `rgba(255,255,240,${0.4+0.6*tw})`;
+      ctx.fillRect(Math.round(s.x*W), Math.round(s.y*H), s.r, s.r);
+    });
+    ctx.restore();
+  }
+
+  // moon
+  if(d > 0.05){
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, d) * (1-rainAmount*0.85);
+    const mx = moonX*W, my = moonY*H, mr = 26;
+    ctx.fillStyle = '#f4f1e0';
+    ctx.beginPath(); ctx.arc(mx,my,mr,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = 'rgba(210,205,180,0.5)';
+    ctx.beginPath(); ctx.arc(mx-8,my-6,5,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(mx+9,my+7,7,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(mx+2,my+11,3.5,0,Math.PI*2); ctx.fill();
+    ctx.globalAlpha *= 0.25;
+    const glow = ctx.createRadialGradient(mx,my,mr, mx,my,mr*2.6);
+    glow.addColorStop(0,'rgba(244,241,224,0.5)');
+    glow.addColorStop(1,'rgba(244,241,224,0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath(); ctx.arc(mx,my,mr*2.6,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+
+  // clouds (day-ish)
+  ctx.save();
+  ctx.globalAlpha = Math.max(Math.max(0, 0.85-d*1.1), rainAmount*0.95);
+  const cloudColor = mixRgb('rgb(255,255,255)', lerpColor('#5a636f','#1b2232', d), rainAmount*0.9);   // darker in rain
+  const cloudCols = [0.12,0.42,0.7,0.88];
+  cloudCols.forEach((cx,i)=>{
+    const cy = 0.12+ (i%2)*0.06;
+    const x = ((cx*W) + now*0.006 + i*80) % (W+160) - 80;
+    ctx.fillStyle = cloudColor;
+    puffCloud(x, cy*H, 26+((i*13)%18));
+  });
+  if(rainAmount > 0.01){                      // extra, bigger storm clouds fill the gaps
+    [0.02,0.3,0.55,0.78,0.97].forEach((cx,i)=>{
+      const x = ((cx*W) + now*0.004 + i*120) % (W+200) - 100;
+      ctx.globalAlpha = 0.95*rainAmount;
+      ctx.fillStyle = cloudColor;
+      puffCloud(x, (0.07+(i%3)*0.05)*H, 40+((i*17)%22));
+    });
+  }
+  ctx.restore();
+
+  // ground
+  const groundY = H*0.80;
+  if(currentBiome === 'river'){
+    const bankH = 20;
+    const bankTop = lerpColor('#7fae52','#1a2a1c', d);
+    const bankBot = lerpColor('#5e8a3e','#0f1a12', d);
+    const bg = ctx.createLinearGradient(0,groundY,0,groundY+bankH);
+    bg.addColorStop(0, bankTop); bg.addColorStop(1, bankBot);
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, groundY, W, bankH);
+
+    const waterTop = lerpColor('#5fa8c9','#0a1830', d);
+    const waterBot = lerpColor('#2f7a9a','#050c1c', d);
+    const wg = ctx.createLinearGradient(0, groundY+bankH, 0, H);
+    wg.addColorStop(0, waterTop); wg.addColorStop(1, waterBot);
+    ctx.fillStyle = wg;
+    ctx.fillRect(0, groundY+bankH, W, H-(groundY+bankH));
+
+    ctx.save();
+    ctx.globalAlpha = 0.22;
+    ctx.strokeStyle = lerpColor('#ffffff','#7f92c9', d);
+    ctx.lineWidth = 1.5;
+    for(let i=0;i<6;i++){
+      const wy = groundY+bankH+16 + i*20 + Math.sin(now*0.0006+i)*3;
+      ctx.beginPath(); ctx.moveTo(0,wy); ctx.lineTo(W,wy); ctx.stroke();
+    }
+    ctx.restore();
+  } else {
+    const cols = BIOME_GROUND[currentBiome] || BIOME_GROUND.forest;
+    const groundTop = lerpColor(cols[0],'#1a2a1c', d);
+    const groundBot = lerpColor(cols[1],'#0f1a12', d);
+    const gg = ctx.createLinearGradient(0,groundY,0,H);
+    gg.addColorStop(0, groundTop); gg.addColorStop(1, groundBot);
+    ctx.fillStyle = gg;
+    ctx.fillRect(0, groundY, W, H-groundY);
+  }
+
+  // biome decorations (trees / reeds / fence posts)
+  const decorFn = BIOME_DECOR[currentBiome];
+  if(decorFn) decorFn(groundY, d);
+
+  // flightless birds walk here: in front of the trees, behind the cacti / posts / ferns / tufts
+  // (in the Mountains every bird is drawn here, so the stones hide any bird that is behind them)
+  flying.forEach(inst=>{
+    if(!birdDrawnBehindFront(inst)) return;
+    const pos = getBirdPos(inst, now);
+    if(pos) drawBirdInst(inst, pos, now);
+  });
+  drawJungleGround(now);   // rainforest toads, lizards and snakes
+  drawCoastGround(now);    // coast crabs
+  drawAmbience(now);       // rabbits, hares and jumping fish (behind anything below the line)
+  const frontFn = BIOME_DECOR_FRONT[currentBiome];
+  if(frontFn) frontFn(groundY, d);
+}
+
+function puffCloud(x,y,r){
+  ctx.beginPath();
+  ctx.arc(x,y,r*0.6,0,Math.PI*2);
+  ctx.arc(x+r*0.55,y+4,r*0.5,0,Math.PI*2);
+  ctx.arc(x-r*0.55,y+6,r*0.42,0,Math.PI*2);
+  ctx.fill();
+}
+
+/* ============================== BIRD INSTANCES ============================== */
+let flying = [];
+let tickTimer = 0; // fires the spawn roll once every TICK_INTERVAL ms
+let gameClock = 0; // virtual clock in ms — only advances while the game is running and not paused
+let lastRealTime = performance.now();
+
+function pickRandomFrom(arr){
+  if(!arr.length) return null;
+  return arr[Math.floor(Math.random()*arr.length)];
+}
+function findBirdByName(name){
+  return BIRDS.find(b=>b.name===name) || null;
+}
+
+// ---- The once-a-second spawn roll ----
+// 1) Roll 1-1000 to choose a rarity tier. This is what keeps extraordinary birds
+//    genuinely rare: only a single number (1) out of 1000 triggers one.
+//      > 200          -> common       (80.0% of rolls)
+//      > 50  and <200 -> uncommon     (14.9% of rolls)
+//      > 1   and <50  -> rare         ( 4.8% of rolls)
+//      === 1          -> extraordinary( 0.1% of rolls)
+//      (50 or 200 exactly land in neither band -> nothing spawns this tick)
+function rollTier(){
+  const n = 1 + Math.floor(Math.random()*1000);
+  if(n > 200) return 'common';
+  if(n > 50 && n < 200) return 'uncommon';
+  if(n > 1 && n < 50) return 'rare';
+  if(n === 1) return 'extraordinary';
+  return null;
+}
+
+// ---- Seasons ----
+// Spring 1 Mar–31 May, Summer 1 Jun–31 Aug, Autumn 1 Sep–30 Nov, Winter 1 Dec–end of Feb
+// (28th or 29th, handled automatically by the real calendar).
+const SEASON_INFO = {
+  spring: { label:'Spring', range:'1 Mar – 31 May' },
+  summer: { label:'Summer', range:'1 Jun – 31 Aug' },
+  autumn: { label:'Autumn', range:'1 Sep – 30 Nov' },
+  winter: { label:'Winter', range:'1 Dec – end of Feb' }
+};
+function getCurrentSeason(){
+  const m = new Date().getMonth(); // 0 = Jan
+  if(m >= 2 && m <= 4)  return 'spring';
+  if(m >= 5 && m <= 7)  return 'summer';
+  if(m >= 8 && m <= 10) return 'autumn';
+  return 'winter';
+}
+// Seasonal birds get their own separate long-shot roll each tick, but only while their
+// season is on and you're standing in their biome: 1 in SEASONAL_ODDS. Raise it to make them rarer.
+const SEASONAL_ODDS = 2000;
+
+// 2) If the tier came up common, roll again 1-100 to see if it's the biome's
+//    "flagship" common bird (Wood Pigeon in forest, Mallard in river) or an
+//    ordinary common bird instead. Field has no flagship, so a high roll there
+//    means nothing spawns.
+function rollCommonSpecies(phase){
+  const roll = 1 + Math.floor(Math.random()*100);
+  if(roll > 60){
+    if(currentBiome === 'forest') return findBirdByName('Wood Pigeon');
+    if(currentBiome === 'river')  return findBirdByName('Mallard');
+    if(currentBiome === 'field')  return null; // field: nothing spawns on this roll
+    // rainforest has no flagship: falls through to its ordinary common pool
+  }
+  const flagshipId = currentBiome==='forest' ? 'wood-pigeon' : currentBiome==='river' ? 'mallard' : null;
+  const pool = BIRDS.filter(b=> b.tier==='common' && (b.phase===phase || b.phase==='both') && b.biomes.includes(currentBiome) && b.id!==flagshipId);
+  return pickRandomFrom(pool);
+}
+
+// 3) For any other tier, pick uniformly among matching species for the current
+//    biome + day/night phase. If nothing matches (e.g. no extraordinary night
+//    birds in this biome right now), nothing spawns.
+// Mountains are huge and open, so birds there spawn 30% less often than in other biomes (every tier).
+const MOUNTAIN_SPAWN_REDUCTION = 0.30;
+
+function rollSpeciesForTick(phase){
+  if(currentBiome === 'mountains' && Math.random() < MOUNTAIN_SPAWN_REDUCTION) return null;
+  // Seasonal visitors: separate 1-in-SEASONAL_ODDS roll, only if one is in season in this biome.
+  const seasonalPool = BIRDS.filter(b=> b.tier==='seasonal' && b.season===getCurrentSeason() && (b.phase===phase || b.phase==='both') && b.biomes.includes(currentBiome));
+  if(seasonalPool.length && 1 + Math.floor(Math.random()*SEASONAL_ODDS) === 1) return pickRandomFrom(seasonalPool);
+
+  const tier = rollTier();
+  if(!tier) return null;
+  if(tier === 'common') return rollCommonSpecies(phase);
+  const pool = BIRDS.filter(b=> b.tier===tier && (b.phase===phase || b.phase==='both') && b.biomes.includes(currentBiome));
+  return pickRandomFrom(pool);
+}
+
+function spawnBirdInstance(species, summoned){
+  const fromLeft = Math.random()<0.5;
+  const bandTop = H*0.10, bandBottom = H*0.62;
+  // flightless birds keep their feet on the ground (works out where this sprite's legs end)
+  const legList = SHAPES[species.shape].legs;
+  const legBottom = Array.isArray(legList) && legList.length ? Math.max(...legList.map(l=>l.y+l.h)) : 16;
+  const walkY = H*0.80 + 8 - (legBottom/16 - 0.5)*species.size;
+  const startY = species.walks ? walkY : bandTop + Math.random()*(bandBottom-bandTop);
+  const startX = fromLeft ? -80 : W+80;
+  const speed = (0.045 + Math.random()*0.02) * TIER_SPEED[species.tier] * (W/1400) * (species.walks || 1) * (species.speed || 1);
+
+  const perches = BIOME_PERCHES[currentBiome] || [];
+  const willPerch = !species.walks && Math.random() < 0.5;
+  const waypoints = [];
+  waypoints.push({x:startX, y:startY, hold:0});
+
+  if(willPerch && perches.length){
+    const branch = perches[Math.floor(Math.random()*perches.length)];
+    const bx = branch.xPct*W, by = branch.yPct*H - 6;
+    waypoints.push({x:bx, y:by, hold:0});
+    waypoints.push({x:bx, y:by, hold: 3200+Math.random()*3200});
+  } else if(species.walks){
+    const stopX = W*0.5 + (Math.random()-0.5)*W*0.5;
+    waypoints.push({x:stopX, y:walkY, hold:0});
+    waypoints.push({x:stopX, y:walkY, hold: 2500+Math.random()*3000});
+  } else {
+    const midX = W*0.5 + (Math.random()-0.5)*W*0.3;
+    const midY = bandTop + Math.random()*(bandBottom-bandTop);
+    waypoints.push({x:midX, y:midY, hold:0});
+  }
+  const exitLeft = Math.random()<0.5;
+  const exitY = species.walks ? walkY : bandTop + Math.random()*(bandBottom-bandTop);
+  waypoints.push({x: exitLeft? -80: W+80, y: exitY, hold:0});
+
+  // Birds with a dive chance (Peregrine Falcon) sometimes do a stoop. The path is built from curves
+  // with the speed ramping up and down, so it flows smoothly instead of snapping between straight lines:
+  //   level flight -> curve over into the dive -> straight plunge (speeding up) -> curve out -> rocket
+  //   across the screen to the other side at 10x speed.
+  if(species.dive && Math.random() < species.dive){
+    const dir = fromLeft ? 1 : -1;
+    const ax = W*(0.25 + Math.random()*0.5), ay = H*0.14;   // where it starts to pitch over
+    const r1 = H*0.10, r2 = H*0.12;                         // radius of the two curves
+    const ex = ax + dir*r1;                                 // x of the straight plunge
+    const bottomY = H*0.74, plungeEndY = bottomY - r2;
+    const N = 14;
+    waypoints.length = 1;
+    waypoints[0].y = ay;                                    // fly in level, so there's no kink at the start
+    waypoints.push({x:ax, y:ay, hold:0});
+    for(let i=1;i<=N;i++){                                  // 1) pitch over into the dive
+      const th = (i/N)*Math.PI/2;
+      waypoints.push({x: ax + dir*r1*Math.sin(th), y: ay + r1*(1-Math.cos(th)), hold:0, spd: 1.2 + (i/N)*2.8});
+    }
+    const plungeStartY = ay + r1;
+    for(let i=1;i<=4;i++){                                  // 2) straight down, getting faster
+      waypoints.push({x:ex, y: plungeStartY + (plungeEndY-plungeStartY)*(i/4), hold:0, spd: 4 + (i/4)*6});
+    }
+    for(let i=1;i<=N;i++){                                  // 3) pull out of the dive and level off
+      const ph = (i/N)*Math.PI/2;
+      waypoints.push({x: ex + dir*r2*(1-Math.cos(ph)), y: plungeEndY + r2*Math.sin(ph), hold:0, spd:10});
+    }
+    waypoints.push({x: dir>0 ? W+140 : -140, y: bottomY, hold:0, spd:10});   // 4) rocket across to the other side
+  }
+
+  // Birds with a plunge chance (Gannet) sometimes dive headfirst into the sea: they curve over into a
+  // straight plunge, sink below the surface (the part under the water is hidden), splash, then burst
+  // back out and climb away.
+  let plungeIdx = -1;
+  if(species.plunge && Math.random() < species.plunge){
+    const dir = fromLeft ? 1 : -1;
+    const sz = species.size, seaY = coastSeaY();
+    const ax = W*(0.2 + Math.random()*0.6), ay = H*0.14;
+    const r1 = H*0.10, ex = ax + dir*r1;
+    const entryY = seaY - sz*0.5;                           // beak just touching the water
+    const N = 12;
+    waypoints.length = 1;
+    waypoints[0].y = ay;
+    waypoints.push({x:ax, y:ay, hold:0});
+    for(let i=1;i<=N;i++){                                  // 1) pitch over into the dive
+      const th = (i/N)*Math.PI/2;
+      waypoints.push({x: ax + dir*r1*Math.sin(th), y: ay + r1*(1-Math.cos(th)), hold:0, spd: 1.2 + (i/N)*1.8});
+    }
+    const plungeStartY = ay + r1;
+    for(let i=1;i<=3;i++){                                  // 2) straight plunge, speeding up
+      waypoints.push({x:ex, y: plungeStartY + (entryY-plungeStartY)*(i/3), hold:0, spd: 3 + (i/3)*4});
+    }
+    plungeIdx = waypoints.length-1;                         // the moment it hits the water
+    waypoints.push({x:ex+dir*4, y: seaY + sz*0.6, hold: 600 + Math.random()*500, spd:4, clip:true});   // 3) under the surface
+    const mx = ex + dir*4 + dir*sz*0.5, my = seaY - sz*0.6;
+    waypoints.push({x:mx, y:my, hold:0, spd:3, clip:true});                                            // 4) bursts back out
+    const r2 = sz*1.6, aEnd = 0.96, M = 8;
+    for(let i=1;i<=M;i++){                                  // 5) curve away from vertical to a climbing angle
+      const a = (i/M)*aEnd;
+      waypoints.push({x: mx + dir*r2*(1-Math.cos(a)), y: my - r2*Math.sin(a), hold:0, spd:2.5});
+    }
+    const last = waypoints[waypoints.length-1], L = Math.max(W,H)*1.3;
+    waypoints.push({x: last.x + dir*Math.sin(aEnd)*L, y: last.y - Math.cos(aEnd)*L, hold:0, spd:1.6});   // 6) climb away
+  }
+
+  // compute cumulative timeline
+  let t = 0;
+  const timeline = [{ t:0, x:waypoints[0].x, y:waypoints[0].y }];
+  for(let i=1;i<waypoints.length;i++){
+    const prev = waypoints[i-1], cur = waypoints[i];
+    const dist = Math.hypot(cur.x-prev.x, cur.y-prev.y);
+    t += dist/(speed*(cur.spd || 1));
+    timeline.push({ t, x:cur.x, y:cur.y, spd:cur.spd || 1, fast:(cur.spd || 1) > 1, clip:!!cur.clip });
+    if(cur.hold){
+      t += cur.hold;
+      timeline.push({ t, x:cur.x, y:cur.y, clip:!!cur.clip });
+    }
+  }
+
+  const splash = plungeIdx >= 0 ? { t: timeline[plungeIdx].t, x: waypoints[plungeIdx].x, y: coastSeaY() } : null;
+  const inst = {
+    species, splash, spawnAt: gameClock, timeline, totalT: t,
+    facingRight: true, bobSeed: Math.random()*10, clicked:false, summoned: !!summoned,
+    perched: !!(willPerch && perches.length)
+  };
+  flying.push(inst);
+  return inst;
+}
+
+// Flocks: birds marked { flock:true } have a 1 in 3 chance of arriving as a group of 3 to 8
+// (natural spawns and Creative Mode summons; Creative Mode can switch flocks off in Settings).
+// The first bird picks the route; the others copy it with a small offset and a short delay,
+// so the group enters, perches or walks together and leaves together.
+const FLOCK_CHANCE = 1/3;
+const FLOCK_COOLDOWN = 60000;   // ms: after a natural flock arrives, no other flock can start for this long
+let lastFlockAt = -Infinity;
+function spawnFlock(species, summoned){
+  const leader = spawnBirdInstance(species, summoned);
+  const followers = 2 + Math.floor(Math.random()*6);          // 3 to 8 birds in total
+  for(let i=0;i<followers;i++){
+    const ox = (Math.random()-0.5) * (leader.perched ? 70 : 150);
+    const oy = (Math.random()-0.5) * (species.walks ? 14 : (leader.perched ? 8 : 70));
+    flying.push({
+      species,
+      spawnAt: leader.spawnAt + 300 + Math.random()*1900,     // trail in behind the leader, a few at a time
+      timeline: leader.timeline.map(pt=> Object.assign({}, pt, { x:pt.x+ox, y:pt.y+oy })),
+      totalT: leader.totalT,
+      facingRight: true, bobSeed: Math.random()*10, clicked:false, summoned: !!summoned,
+      perched: leader.perched
+    });
+  }
+}
+
+function updateBirdFacing(inst, x0, x1){
+  inst.facingRight = x1 >= x0;
+}
+
+function getBirdPos(inst, now){
+  const elapsed = now - inst.spawnAt;
+  const tl = inst.timeline;
+  if(elapsed >= inst.totalT) return null;
+  let seg = 0;
+  while(seg < tl.length-1 && tl[seg+1].t < elapsed) seg++;
+  const a = tl[seg], b = tl[Math.min(seg+1, tl.length-1)];
+  const span = Math.max(1, b.t-a.t);
+  const p = Math.min(1, Math.max(0, (elapsed-a.t)/span));
+  const x = a.x + (b.x-a.x)*p;
+  const bob = inst.species.walks ? -Math.abs(Math.sin((elapsed*0.008*Math.sqrt(inst.species.walks))+inst.bobSeed))*3 : Math.sin((elapsed*0.004)+inst.bobSeed)*4;
+  const bobScale = Math.max(0, 1 - ((b.spd || 1) - 1)/0.8);   // no wobble while diving
+  const y = a.y + (b.y-a.y)*p + bob*bobScale;
+  if(!(b.fast && a.x === b.x)) updateBirdFacing(inst, a.x, b.x);   // a straight plunge keeps the way it was facing
+  return {x, y, fast:!!b.fast && b.t>a.t, clip:!!b.clip, ang:Math.atan2(b.y-a.y, b.x-a.x)};
+}
+
+/* ============================== DISCOVERY / PERSISTENCE ============================== */
+const STORAGE_KEY = 'hedgerowHoursDiscovered';
+let discovered = new Set();
+try{
+  const saved = JSON.parse(localStorage.getItem(STORAGE_KEY)||'[]');
+  saved.forEach(id=>discovered.add(id));
+}catch(e){}
+
+function saveDiscovered(){
+  if(adminMode) return;   // admin sessions are never saved
+  try{ localStorage.setItem(STORAGE_KEY, JSON.stringify([...discovered])); }catch(e){}
+}
+
+const countNum = document.getElementById('countNum');
+const journalCount = document.getElementById('journalCount');
+document.getElementById('countTotal').textContent = BIRDS.length;
+function refreshCounts(){
+  countNum.textContent = discovered.size;
+  journalCount.textContent = discovered.size;
+}
+refreshCounts();
+
+function showToast(msg){
+  const wrap = document.getElementById('toastWrap');
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.textContent = msg;
+  wrap.appendChild(el);
+  setTimeout(()=> el.remove(), 2700);
+}
+
+function discoverBird(species){
+  if(discovered.has(species.id)) return;
+  discovered.add(species.id);
+  saveDiscovered();
+  refreshCounts();
+  showToast('NEW! ' + species.name.toUpperCase() + ' (' + species.tier.toUpperCase() + ')');
+  if(journalOpen) renderJournal();
+}
+
+/* ============================== BIOMES (switching) ============================== */
+const biomeButtons = {
+  forest: document.getElementById('biomeForestBtn'),
+  river:  document.getElementById('biomeRiverBtn'),
+  field:  document.getElementById('biomeFieldBtn'),
+  rainforest: document.getElementById('biomeRainforestBtn'),
+  savannah: document.getElementById('biomeSavannahBtn'),
+  mountains: document.getElementById('biomeMountainsBtn'),
+  coast: document.getElementById('biomeCoastBtn')
+};
+function switchBiome(name){
+  if(name === currentBiome) return;
+  currentBiome = name;
+  flying = [];
+  critters = [];
+  tickTimer = 400; // spawn something in the new biome soon
+  Object.entries(biomeButtons).forEach(([k,btn])=> btn.classList.toggle('active', k===name));
+}
+Object.entries(biomeButtons).forEach(([name,btn])=>{
+  btn.addEventListener('click', ()=> switchBiome(name));
+});
+
+/* ============================== BINOCULARS ============================== */
+let binocOn = false;
+let mouseX = W/2, mouseY = H/2;
+const binocBtn = document.getElementById('binocBtn');
+const LENS_ZOOM = 2.3;
+function lensRadius(){ return Math.min(W,H)*0.24; }
+binocBtn.addEventListener('click', ()=>{
+  binocOn = !binocOn;
+  binocBtn.classList.toggle('active', binocOn);
+  document.getElementById('world').classList.toggle('binocMode', binocOn);
+});
+
+function drawBinoculars(){
+  if(!binocOn) return;
+  const radius = lensRadius();
+  const zoom = LENS_ZOOM;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(mouseX, mouseY, radius, 0, Math.PI*2);
+  ctx.clip();
+  const sw = (radius*2)/zoom, sh = (radius*2)/zoom;
+  ctx.drawImage(canvas, mouseX-sw/2, mouseY-sh/2, sw, sh, mouseX-radius, mouseY-radius, radius*2, radius*2);
+  ctx.restore();
+
+  // dark mask outside lens + ring
+  ctx.save();
+  ctx.fillStyle = 'rgba(4,3,2,0.86)';
+  ctx.beginPath();
+  ctx.rect(0,0,W,H);
+  ctx.arc(mouseX, mouseY, radius, 0, Math.PI*2);
+  ctx.fill('evenodd');
+  ctx.restore();
+
+  ctx.save();
+  ctx.lineWidth = 10;
+  ctx.strokeStyle = '#2a1c10';
+  ctx.beginPath(); ctx.arc(mouseX,mouseY,radius, 0, Math.PI*2); ctx.stroke();
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = '#c8a24a';
+  ctx.beginPath(); ctx.arc(mouseX,mouseY,radius-6, 0, Math.PI*2); ctx.stroke();
+  // crosshair
+  ctx.strokeStyle = 'rgba(200,162,74,0.55)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(mouseX-radius+16,mouseY); ctx.lineTo(mouseX+radius-16,mouseY);
+  ctx.moveTo(mouseX,mouseY-radius+16); ctx.lineTo(mouseX,mouseY+radius-16);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/* ============================== PHOTO ALBUM ============================== */
+const PHOTO_KEY = 'hedgerowHoursPhotos';
+const MAX_PHOTOS = 40;
+let photos = [];
+try{
+  photos = JSON.parse(localStorage.getItem(PHOTO_KEY) || '[]');
+}catch(e){ photos = []; }
+
+function savePhotos(){
+  if(adminMode) return;   // admin sessions are never saved
+  try{ localStorage.setItem(PHOTO_KEY, JSON.stringify(photos)); }catch(e){}
+}
+
+const photoCountEl = document.getElementById('photoCount');
+function refreshPhotoCount(){ photoCountEl.textContent = photos.length; }
+refreshPhotoCount();
+
+let pendingPhotoCapture = false;
+
+function capturePhotoFromCanvas(){
+  const size = 220;
+  const radius = lensRadius();
+  const zoom = LENS_ZOOM;
+  const sw = (radius*2)/zoom, sh = (radius*2)/zoom;
+
+  const off = document.createElement('canvas');
+  off.width = size; off.height = size;
+  const og = off.getContext('2d');
+  og.imageSmoothingEnabled = false;
+  og.save();
+  og.beginPath();
+  og.arc(size/2, size/2, size/2, 0, Math.PI*2);
+  og.clip();
+  og.drawImage(canvas, mouseX-sw/2, mouseY-sh/2, sw, sh, 0, 0, size, size);
+  og.restore();
+
+  let dataURL;
+  try{ dataURL = off.toDataURL('image/jpeg', 0.82); }catch(e){ return; }
+
+  photos.unshift({ img: dataURL, at: Date.now(), biome: currentBiome });
+  if(photos.length > MAX_PHOTOS) photos.length = MAX_PHOTOS;
+  savePhotos();
+  refreshPhotoCount();
+  if(photoOpen) renderPhotoAlbum();
+
+  showToast('PHOTO CAPTURED!');
+  const flashEl = document.getElementById('flashFx');
+  flashEl.classList.remove('flash');
+  void flashEl.offsetWidth; // restart animation
+  flashEl.classList.add('flash');
+}
+
+const photoOverlay = document.getElementById('photoOverlay');
+const photoBody = document.getElementById('photoBody');
+const photoSub = document.getElementById('photoSub');
+let photoOpen = false;
+
+function openPhotoAlbum(){
+  photoOpen = true;
+  photoOverlay.classList.add('open');
+  renderPhotoAlbum();
+}
+function closePhotoAlbum(){
+  photoOpen = false;
+  photoOverlay.classList.remove('open');
+}
+document.getElementById('photoBtn').addEventListener('click', openPhotoAlbum);
+document.getElementById('closePhotos').addEventListener('click', closePhotoAlbum);
+photoOverlay.addEventListener('click', (e)=>{ if(e.target===photoOverlay) closePhotoAlbum(); });
+
+function renderPhotoAlbum(){
+  photoSub.textContent = photos.length + (photos.length===1 ? ' photo taken' : ' photos taken');
+  photoBody.innerHTML = '';
+  if(photos.length === 0){
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = "No photos yet. Open your binoculars and press S to take one!";
+    photoBody.appendChild(empty);
+    return;
+  }
+  photos.forEach((p, idx)=>{
+    const card = document.createElement('div');
+    card.className = 'photoCard';
+    const img = document.createElement('img');
+    img.src = p.img;
+    const when = document.createElement('div');
+    when.className = 'when';
+    const d = new Date(p.at);
+    when.textContent = d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    const del = document.createElement('button');
+    del.className = 'delBtn';
+    del.textContent = '✕';
+    del.addEventListener('click', ()=>{
+      photos.splice(idx,1);
+      savePhotos();
+      refreshPhotoCount();
+      renderPhotoAlbum();
+    });
+    card.appendChild(img);
+    card.appendChild(when);
+    card.appendChild(del);
+    photoBody.appendChild(card);
+  });
+}
+
+/* keybind: S takes a photo while binoculars are active, otherwise toggles the album */
+window.addEventListener('keydown', (e)=>{
+  if(e.target && e.target.tagName === 'INPUT') return;
+  if(e.key !== 's' && e.key !== 'S') return;
+  if(binocOn){
+    pendingPhotoCapture = true;
+  } else {
+    if(photoOpen) closePhotoAlbum(); else openPhotoAlbum();
+  }
+});
+
+/* ============================== SETTINGS ============================== */
+const SETTINGS_KEY = 'hedgerowHoursSettings';
+let settings = { difficulty:'normal', volumeMode:false, activeMode:false, musicEnabled:true };
+try{
+  const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null');
+  if(saved) settings = Object.assign(settings, saved);
+}catch(e){}
+function saveSettings(){
+  try{ localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); }catch(e){}
+}
+
+let paused = false;
+let settingsOpen = false;
+
+const settingsOverlay = document.getElementById('settingsOverlay');
+const checkboxRows = {
+  easy:   document.querySelector('.settingRow[data-setting="easy"]'),
+  normal: document.querySelector('.settingRow[data-setting="normal"]'),
+  hard:   document.querySelector('.settingRow[data-setting="hard"]'),
+  volume: document.querySelector('.settingRow[data-setting="volume"]'),
+  active: document.querySelector('.settingRow[data-setting="active"]'),
+  music:  document.querySelector('.settingRow[data-setting="music"]')
+};
+
+function refreshSettingsUI(){
+  ['easy','normal','hard'].forEach(k=>{
+    checkboxRows[k].classList.toggle('checked', settings.difficulty === k);
+  });
+  checkboxRows.volume.classList.toggle('checked', settings.volumeMode);
+  checkboxRows.active.classList.toggle('checked', settings.activeMode);
+  checkboxRows.music.classList.toggle('checked', settings.musicEnabled);
+  document.getElementById('micMeterWrap').style.display = settings.volumeMode ? 'flex' : 'none';
+}
+refreshSettingsUI();
+
+['easy','normal','hard'].forEach(k=>{
+  checkboxRows[k].addEventListener('click', ()=>{
+    settings.difficulty = k;
+    saveSettings();
+    refreshSettingsUI();
+  });
+});
+checkboxRows.volume.addEventListener('click', ()=>{
+  if(!settings.volumeMode) enableVolumeMode(); else disableVolumeMode();
+});
+checkboxRows.active.addEventListener('click', ()=>{
+  settings.activeMode = !settings.activeMode;
+  if(settings.activeMode) lastActiveAt = gameClock;
+  saveSettings();
+  refreshSettingsUI();
+});
+checkboxRows.music.addEventListener('click', ()=>{
+  settings.musicEnabled = !settings.musicEnabled;
+  saveSettings();
+  refreshSettingsUI();
+  if(settings.musicEnabled){
+    if(started) playMusicSafely();
+  } else {
+    bgMusic.pause();
+  }
+});
+
+function openSettings(){
+  settingsOpen = true;
+  paused = true;
+  settingsOverlay.classList.add('open');
+  document.getElementById('settingsBtn').classList.add('active');
+}
+function closeSettings(){
+  settingsOpen = false;
+  paused = false;
+  settingsOverlay.classList.remove('open');
+  document.getElementById('settingsBtn').classList.remove('active');
+  if(settings.activeMode) lastActiveAt = gameClock; // don't punish clicks spent adjusting settings
+}
+document.getElementById('settingsBtn').addEventListener('click', ()=>{
+  if(settingsOpen) closeSettings(); else openSettings();
+});
+document.getElementById('closeSettings').addEventListener('click', closeSettings);
+settingsOverlay.addEventListener('click', (e)=>{ if(e.target===settingsOverlay) closeSettings(); });
+
+/* ---- Volume Mode (microphone) ---- */
+const VOLUME_THRESHOLD = 0.16; // normalized 0-1 RMS level above which birds won't spawn
+let currentMicLevel = 0;
+let micAudioCtx = null, micAnalyser = null, micData = null, micStream = null;
+
+async function enableVolumeMode(){
+  try{
+    micStream = await navigator.mediaDevices.getUserMedia({ audio:true });
+    micAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const source = micAudioCtx.createMediaStreamSource(micStream);
+    micAnalyser = micAudioCtx.createAnalyser();
+    micAnalyser.fftSize = 512;
+    micData = new Uint8Array(micAnalyser.fftSize);
+    source.connect(micAnalyser); // not connected to destination — we only listen, never play back
+    settings.volumeMode = true;
+    saveSettings();
+    refreshSettingsUI();
+  }catch(err){
+    showToast('MIC ACCESS UNAVAILABLE — VOLUME MODE OFF');
+    settings.volumeMode = false;
+    saveSettings();
+    refreshSettingsUI();
+  }
+}
+function disableVolumeMode(){
+  settings.volumeMode = false;
+  saveSettings();
+  refreshSettingsUI();
+  if(micStream){ micStream.getTracks().forEach(t=>t.stop()); micStream=null; }
+  if(micAudioCtx){ micAudioCtx.close().catch(()=>{}); micAudioCtx=null; }
+  micAnalyser = null; micData = null;
+  currentMicLevel = 0;
+  updateMicMeterUI();
+}
+function sampleMicLevel(){
+  if(!micAnalyser || !micData) return;
+  micAnalyser.getByteTimeDomainData(micData);
+  let sumSq = 0;
+  for(let i=0;i<micData.length;i++){
+    const v = (micData[i]-128)/128;
+    sumSq += v*v;
+  }
+  currentMicLevel = Math.sqrt(sumSq/micData.length);
+  updateMicMeterUI();
+}
+function updateMicMeterUI(){
+  if(!settingsOpen) return;
+  const fill = document.getElementById('micMeterFill');
+  const label = document.getElementById('micMeterLabel');
+  if(!settings.volumeMode){ fill.style.width='0%'; label.textContent='off'; return; }
+  const pct = Math.min(100, Math.round((currentMicLevel/0.5)*100));
+  fill.style.width = pct+'%';
+  fill.style.background = currentMicLevel > VOLUME_THRESHOLD ? '#c9425a' : '#3fa07a';
+  label.textContent = currentMicLevel > VOLUME_THRESHOLD ? 'too loud — birds hiding!' : 'listening…';
+}
+
+/* ---- Active Mode (click every 10s or fall asleep) ---- */
+let lastActiveAt = 0;
+const activeWarningEl = document.getElementById('activeWarning');
+const activeWarningNum = document.getElementById('activeWarningNum');
+function showActiveWarning(sec){
+  activeWarningNum.textContent = sec;
+  activeWarningEl.classList.add('show');
+}
+function hideActiveWarning(){
+  activeWarningEl.classList.remove('show');
+}
+function fallAsleep(){
+  showToast("YOU FELL ASLEEP... RESETTING");
+  performReset();
+}
+document.addEventListener('click', ()=>{
+  if(settings.activeMode) lastActiveAt = gameClock;
+});
+
+/* ============================== JOURNAL UI ============================== */
+const journalOverlay = document.getElementById('journalOverlay');
+const journalBody = document.getElementById('journalBody');
+const journalSub = document.getElementById('journalSub');
+let journalOpen = false;
+let activeTab = 'all';
+
+document.getElementById('journalBtn').addEventListener('click', ()=>{
+  journalOpen = true;
+  journalOverlay.classList.add('open');
+  renderJournal();
+});
+document.getElementById('closeJournal').addEventListener('click', closeJournal);
+journalOverlay.addEventListener('click', (e)=>{ if(e.target===journalOverlay) closeJournal(); });
+function closeJournal(){
+  journalOpen = false;
+  journalOverlay.classList.remove('open');
+}
+
+document.querySelectorAll('.tabBtn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('.tabBtn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    activeTab = btn.dataset.tier;
+    renderJournal();
+  });
+});
+
+function renderJournal(){
+  journalSub.textContent = discovered.size + ' of ' + BIRDS.length + ' species recorded';
+  journalBody.innerHTML = '';
+  const list = BIRDS.filter(b=> activeTab==='all' || b.tier===activeTab);
+  list.forEach(b=>{
+    const found = discovered.has(b.id);
+    const entry = document.createElement('div');
+    entry.className = 'entry' + (found? '' : ' locked');
+
+    const artWrap = document.createElement('canvas');
+    artWrap.className = 'art';
+    artWrap.width = 64; artWrap.height = 64;
+    const g = artWrap.getContext('2d');
+    g.imageSmoothingEnabled = false;
+    if(found){
+      g.drawImage(getBirdIcon(b), 0, 0);
+    } else {
+      g.fillStyle = 'rgba(58,43,26,0.18)';
+      g.fillRect(0,0,64,64);
+      g.fillStyle = 'rgba(58,43,26,0.55)';
+      g.font = '28px monospace';
+      g.textAlign='center'; g.textBaseline='middle';
+      g.fillText('?', 32, 34);
+    }
+
+    const info = document.createElement('div');
+    info.className = 'info';
+    const nameRow = document.createElement('div');
+    nameRow.className = 'nameRow';
+    const nameEl = document.createElement('div');
+    nameEl.className = 'name';
+    nameEl.textContent = found? b.name : '???';
+    const tierEl = document.createElement('div');
+    tierEl.className = 'tier ' + b.tier;
+    tierEl.textContent = b.tier;
+    nameRow.appendChild(nameEl);
+    nameRow.appendChild(tierEl);
+
+    const factEl = document.createElement('div');
+    factEl.className = 'fact';
+    if(found) factEl.textContent = b.fact;
+    else if(b.tier==='seasonal') factEl.textContent = 'Not yet observed. Only visits in ' + SEASON_INFO[b.season].label + ' (' + SEASON_INFO[b.season].range + ').';
+    else factEl.textContent = 'Not yet observed. Keep watching the ' + (b.phase==='night'?'night sky.':(b.biomes.includes('rainforest')?'rainforest canopy.':(b.biomes[0]==='savannah'?'dry plains.':(b.biomes[0]==='mountains'?'mountain crags.':(b.biomes[0]==='coast'?'shoreline.':'hedgerows.')))));
+
+    info.appendChild(nameRow);
+    info.appendChild(factEl);
+    entry.appendChild(artWrap);
+    entry.appendChild(info);
+    journalBody.appendChild(entry);
+  });
+}
+
+/* ============================== INPUT ============================== */
+const worldEl = document.getElementById('world');
+worldEl.addEventListener('mousemove', (e)=>{
+  const r = canvas.getBoundingClientRect();
+  mouseX = e.clientX - r.left;
+  mouseY = e.clientY - r.top;
+});
+worldEl.addEventListener('touchmove', (e)=>{
+  const r = canvas.getBoundingClientRect();
+  const t = e.touches[0];
+  mouseX = t.clientX - r.left;
+  mouseY = t.clientY - r.top;
+}, {passive:true});
+
+worldEl.addEventListener('click', (e)=>{
+  const r = canvas.getBoundingClientRect();
+  const cx = e.clientX - r.left, cy = e.clientY - r.top;
+  handleClick(cx, cy);
+});
+
+function handleClick(cx, cy){
+  const now = gameClock;
+  for(let i=flying.length-1;i>=0;i--){
+    const inst = flying[i];
+    if(inst.summoned && !adminSettings.saving) continue;   // summoned birds can't be logged (unless the admin turns Spawn Saving on)
+    const pos = getBirdPos(inst, now);
+    if(!pos) continue;
+    const size = inst.species.size;
+    const radius = size*0.62;
+    const dx = cx-pos.x, dy = cy-pos.y;
+    if(dx*dx+dy*dy <= radius*radius){
+      discoverBird(inst.species);
+      return; // nothing else happens to the bird itself
+    }
+  }
+}
+
+/* ============================== MAIN LOOP ============================== */
+const dayBadge = document.getElementById('dayBadge');
+let started = false;
+
+// Almost every roll actually produces a bird (the species pools are rarely empty),
+// so the tick interval is effectively the real gap between spawns. Normal is tuned
+// back to the ~15s cadence the game had before difficulty modes existed.
+function currentTickInterval(){
+  if(settings.difficulty === 'easy') return 3000;   // much more frequent than normal
+  if(settings.difficulty === 'hard') return 45000;  // very rare, even for commons
+  return 15000;                                     // the original, pre-difficulty pace
+}
+function currentMaxConcurrent(){
+  if(settings.difficulty === 'easy') return 6;
+  if(settings.difficulty === 'hard') return 1;
+  return 3;
+}
+
+/* ============================== AMBIENT BUGS (fireflies at night, flies by day) ============================== */
+// Purely decorative — never added to `flying`, never clickable, never affect any count.
+let ambientBugs = [];
+let ambientType = null; // 'firefly' | 'fly' | null
+
+function spawnAmbientBug(type){
+  const bandTop = H*0.30, bandBottom = H*0.82;
+  return {
+    type,
+    x: Math.random()*W,
+    y: bandTop + Math.random()*(bandBottom-bandTop),
+    seed: Math.random()*1000,
+    driftX: (Math.random()-0.5)*0.02,
+    driftY: (Math.random()-0.5)*0.015,
+    twinkleSeed: Math.random()*Math.PI*2,
+    // flies use these for real wandering flight (see stepAmbientBugs)
+    vx: (Math.random()-0.5)*1.6,
+    vy: (Math.random()-0.5)*1.2
+  };
+}
+
+function stepAmbientBugs(cycle){
+  const desiredType = cycle.darkness > 0.5 ? 'firefly' : 'fly';
+  const desiredCount = desiredType === 'firefly' ? 10 : 15;
+
+  if(ambientType !== desiredType){
+    ambientType = desiredType;
+    ambientBugs = [];
+  }
+  while(ambientBugs.length < desiredCount){
+    ambientBugs.push(spawnAmbientBug(desiredType));
+  }
+  if(ambientBugs.length > desiredCount){
+    ambientBugs.length = desiredCount;
+  }
+
+  const FLY_MAX_SPEED = 1.7;
+  ambientBugs.forEach(b=>{
+    if(b.type === 'firefly'){
+      // slow, gentle drifting float
+      b.x += Math.sin(gameClock*0.0006 + b.seed) * 0.5 + b.driftX;
+      b.y += Math.cos(gameClock*0.0008 + b.seed*1.3) * 0.4 + b.driftY;
+    } else {
+      // real wandering flight: velocity random-walks in direction and speed,
+      // so flies actually travel around instead of hovering near one spot
+      b.vx += (Math.random()-0.5)*0.35;
+      b.vy += (Math.random()-0.5)*0.30;
+      const speed = Math.hypot(b.vx, b.vy);
+      if(speed > FLY_MAX_SPEED){ b.vx = b.vx/speed*FLY_MAX_SPEED; b.vy = b.vy/speed*FLY_MAX_SPEED; }
+      else if(speed < 0.3){ b.vx += (Math.random()-0.5)*0.5; b.vy += (Math.random()-0.5)*0.5; }
+      b.x += b.vx;
+      b.y += b.vy;
+    }
+    if(b.x < -10) b.x = W+10; else if(b.x > W+10) b.x = -10;
+    if(b.y < H*0.25){ b.y = H*0.25; if(b.vy<0) b.vy *= -1; }
+    else if(b.y > H*0.86){ b.y = H*0.86; if(b.vy>0) b.vy *= -1; }
+  });
+}
+
+function rescaleEntitiesForResize(sx, sy){
+  ambientBugs.forEach(b=>{ b.x *= sx; b.y *= sy; });
+  critters.forEach(c=> c.timeline.forEach(pt=>{ pt.x *= sx; pt.y *= sy; }));
+  ambience.forEach(a=>{ a.x *= sx; a.y *= sy; if(a.x0 !== undefined) a.x0 *= sx; if(a.hx0 !== undefined) a.hx0 *= sx; if(a.dx !== undefined && a.type === 'fish') a.dx *= sx; });
+  jungleAir.forEach(b=>{ b.x *= sx; b.y *= sy; if(b.tx !== undefined){ b.tx *= sx; b.ty *= sy; } });
+  coastCrabs.forEach(c=>{ c.x *= sx; c.y *= sy; });
+  coastSeals.forEach(sl=>{ sl.x *= sx; sl.y *= sy; });
+  coastFish.forEach(f=>{ f.x *= sx; f.y *= sy; });
+  if(coastBoat) coastBoat.x *= sx;
+  jungleGround.forEach(g=>{ g.x *= sx; g.y *= sy; if(g.baseY !== undefined) g.baseY *= sy; if(g.trail) g.trail.forEach(pt=>{ pt.x *= sx; pt.y *= sy; }); });
+  flying.forEach(inst=> inst.timeline.forEach(pt=>{ pt.x *= sx; pt.y *= sy; }));
+}
+
+function drawAmbientBugs(){
+  ambientBugs.forEach(b=>{
+    if(b.type === 'firefly'){
+      const twinkle = 0.35 + 0.65*Math.max(0, Math.sin(gameClock*0.003 + b.twinkleSeed));
+      ctx.save();
+      ctx.globalAlpha = twinkle;
+      const glow = ctx.createRadialGradient(b.x,b.y,0, b.x,b.y,7);
+      glow.addColorStop(0, 'rgba(220,255,140,0.9)');
+      glow.addColorStop(1, 'rgba(220,255,140,0)');
+      ctx.fillStyle = glow;
+      ctx.fillRect(b.x-7, b.y-7, 14, 14);
+      ctx.globalAlpha = Math.min(1, twinkle+0.2);
+      ctx.fillStyle = '#eaffb0';
+      ctx.fillRect(Math.round(b.x-1.5), Math.round(b.y-1.5), 3, 3);
+      ctx.restore();
+    } else {
+      ctx.save();
+      ctx.globalAlpha = 0.8;
+      ctx.fillStyle = '#2a241c';
+      ctx.fillRect(Math.round(b.x-1.5), Math.round(b.y-1.5), 3, 3);
+      ctx.restore();
+    }
+  });
+}
+
+/* ============================== RAINFOREST WILDLIFE ============================== */
+// Lots of decorative wildlife, rainforest ONLY: butterflies and dragonflies by day, bats at night, and
+// toads, lizards and snakes moving across the ground. Never clickable, never logged, and it has no
+// effect on bird spawning. Butterflies, dragonflies and bats shelter (fly off) when it rains.
+let jungleAir = [];          // butterflies, dragonflies, bats
+let jungleGround = [];       // toads, lizards, snakes
+let jungleActive = false;    // true while the rainforest is on screen (so it fills up when you arrive)
+let jungleGroundTimer = 1500;
+const JUNGLE_BUTTERFLY_COLORS = [
+  ['#3a7ad9','#1c2a5a'], ['#f0902f','#3a2210'], ['#f0d030','#4a3a10'], ['#e0609a','#4a1a30'], ['#8ad04a','#244a14']
+];
+const JUNGLE_SNAKE_COLORS = [
+  ['#3f8a3a','#d9c84a'], ['#c9302f','#1c1a18'], ['#8a6a3a','#d9c08a']
+];
+
+function spawnJungleAir(type, onscreen){
+  const dir = Math.random()<0.5 ? 1 : -1;
+  const b = { type, dir, seed:Math.random()*1000, heading: dir>0 ? 0 : Math.PI, leaving:false, dead:false, hover:0 };
+  b.x = onscreen ? Math.random()*W : (dir>0 ? -30 : W+30);
+  b.y = H*(0.14 + Math.random()*0.52);
+  if(type === 'butterfly'){
+    b.col = JUNGLE_BUTTERFLY_COLORS[Math.floor(Math.random()*JUNGLE_BUTTERFLY_COLORS.length)];
+    b.speed = 0.035 + Math.random()*0.03;
+  } else if(type === 'dragonfly'){
+    b.speed = 0.22 + Math.random()*0.08;
+    b.tx = b.x; b.ty = b.y; b.hover = Math.random()*800;
+  } else {
+    b.speed = 0.17 + Math.random()*0.06;   // bat
+  }
+  jungleAir.push(b);
+}
+
+function spawnJungleGround(type, onscreen){
+  const dir = Math.random()<0.5 ? 1 : -1;
+  const g = { type, dir, seed:Math.random()*1000, age:0, state:'pause', t:200+Math.random()*600, z:0, leaving:false, dead:false };
+  g.x = onscreen ? W*(0.1 + Math.random()*0.8) : (dir>0 ? -50 : W+50);
+  g.y = H*0.80 + 14 + Math.random()*H*0.15;                     // how far forward on the ground it is
+  if(type === 'snake'){
+    g.col = JUNGLE_SNAKE_COLORS[Math.floor(Math.random()*JUNGLE_SNAKE_COLORS.length)];
+    g.baseY = g.y; g.phase = Math.random()*6; g.speed = 0.04 + Math.random()*0.02; g.len = 22;
+    g.trail = [];
+    for(let k=g.len;k>=0;k--){ const tx = g.x - dir*k*4; g.trail.push({x:tx, y:g.baseY + Math.sin(tx*0.045+g.phase)*5}); }
+    g.y = g.trail[g.trail.length-1].y;
+  }
+  jungleGround.push(g);
+}
+
+function stepJungleLife(dt, cycle){
+  if(currentBiome !== 'rainforest'){ jungleAir.length = 0; jungleGround.length = 0; jungleActive = false; return; }
+  const first = !jungleActive;     // just arrived: fill the screen straight away
+  jungleActive = true;
+  const night = cycle.darkness > 0.5, calm = rainAmount < 0.3;
+  const want = { butterfly:(!night&&calm)?9:0, dragonfly:(!night&&calm)?4:0, bat:(night&&calm)?7:0 };
+
+  // ---- flyers ----
+  jungleAir.forEach(b=>{
+    if(b.leaving){
+      b.x += b.dir*Math.max(b.speed,0.12)*dt*1.6;
+      if(b.x < -60 || b.x > W+60) b.dead = true;
+      return;
+    }
+    if(b.type === 'butterfly'){
+      b.heading += (Math.random()-0.5)*0.012*dt;                // meanders about
+      if((b.y < H*0.10 && Math.sin(b.heading) < 0) || (b.y > H*0.76 && Math.sin(b.heading) > 0)) b.heading = -b.heading;
+      b.x += Math.cos(b.heading)*b.speed*dt;
+      b.y += Math.sin(b.heading)*b.speed*dt*0.7;
+      if(b.x < -80 || b.x > W+80) b.dead = true;
+    } else if(b.type === 'dragonfly'){
+      if(b.hover > 0){ b.hover -= dt; return; }                  // hovers, then darts to a new spot
+      const dx = b.tx-b.x, dy = b.ty-b.y, dist = Math.hypot(dx,dy);
+      if(dist < 6){
+        b.hover = 300 + Math.random()*1200;
+        b.tx = Math.max(-20, Math.min(W+20, b.x + (Math.random()-0.5)*W*0.5));
+        b.ty = H*(0.28 + Math.random()*0.45);
+        return;
+      }
+      b.x += dx/dist*b.speed*dt;
+      b.y += dy/dist*b.speed*dt;
+    } else {                                                     // bat: fast, swooping flight across the screen
+      b.x += b.dir*b.speed*dt;
+      b.y += (Math.sin(gameClock*0.004 + b.seed)*0.11 + Math.sin(gameClock*0.011 + b.seed*2)*0.06)*dt;
+      b.y = Math.max(H*0.10, Math.min(H*0.70, b.y));
+      if(b.x < -60 || b.x > W+60) b.dead = true;
+    }
+  });
+  jungleAir = jungleAir.filter(b=> !b.dead);
+  ['butterfly','dragonfly','bat'].forEach(type=>{
+    const alive = jungleAir.filter(b=> b.type === type && !b.leaving);
+    if(alive.length < want[type]){
+      if(first){ for(let i=alive.length;i<want[type];i++) spawnJungleAir(type, true); }
+      else if(Math.random() < 0.015*dt/16) spawnJungleAir(type, false);
+    } else if(alive.length > want[type] && Math.random() < 0.02*dt/16){
+      const b = alive[Math.floor(Math.random()*alive.length)];
+      b.leaving = true; b.dir = b.x < W/2 ? -1 : 1;              // shelter from the rain / the change of light
+    }
+  });
+
+  // ---- ground creatures ----
+  jungleGround.forEach(g=>{
+    g.age += dt;
+    if(g.age > 90000 && !g.leaving){ g.leaving = true; g.dir = g.x < W/2 ? -1 : 1; }
+    if(g.type === 'toad'){
+      if(g.state === 'pause'){
+        g.t -= dt;
+        if(g.t <= 0){ g.state = 'hop'; g.hopT = 0; g.hopDur = 360 + Math.random()*140; g.hopDist = 50 + Math.random()*40; g.hx0 = g.x; g.hopH = 14 + Math.random()*10; }
+      } else {
+        g.hopT += dt;
+        const p = Math.min(1, g.hopT/g.hopDur);
+        g.x = g.hx0 + g.dir*g.hopDist*p;
+        g.z = Math.sin(p*Math.PI)*g.hopH;
+        if(p >= 1){ g.state = 'pause'; g.z = 0; g.t = 250 + Math.random()*800; }
+      }
+    } else if(g.type === 'lizard'){
+      if(g.state === 'pause'){
+        g.t -= dt;
+        if(g.t <= 0){
+          g.state = 'run'; g.t = 250 + Math.random()*350;
+          if(g.leaving) g.dir = g.x < W/2 ? -1 : 1;
+          else if(Math.random() < 0.08) g.dir *= -1;
+        }
+      } else {
+        g.x += g.dir*0.32*dt;
+        g.t -= dt;
+        if(g.t <= 0){ g.state = 'pause'; g.t = g.leaving ? 50 : 400 + Math.random()*1400; }
+      }
+    } else {                                                     // snake: slithers along in a wave
+      g.x += g.dir*g.speed*dt;
+      const hy = g.baseY + Math.sin(g.x*0.045 + g.phase)*5;
+      const last = g.trail[g.trail.length-1];
+      if(Math.hypot(g.x-last.x, hy-last.y) >= 4){
+        g.trail.push({x:g.x, y:hy});
+        if(g.trail.length > g.len) g.trail.shift();
+      }
+      g.y = hy;
+    }
+    if(g.type === 'snake' ? (g.dir>0 ? g.x > W+140 : g.x < -140) : (g.x < -80 || g.x > W+80)) g.dead = true;
+  });
+  jungleGround = jungleGround.filter(g=> !g.dead);
+
+  jungleGroundTimer -= dt;
+  if(jungleGroundTimer <= 0){
+    jungleGroundTimer = 1500 + Math.random()*3500;               // a new creature every few seconds
+    if(jungleGround.length < 9){
+      const r = Math.random();
+      const type = night ? (r<0.55 ? 'toad' : (r<0.65 ? 'lizard' : 'snake')) : (r<0.30 ? 'toad' : (r<0.75 ? 'lizard' : 'snake'));
+      spawnJungleGround(type, false);
+    }
+  }
+  if(first){ spawnJungleGround('toad', true); spawnJungleGround('lizard', true); spawnJungleGround('snake', true); }
+}
+
+function drawJungleAir(now){
+  if(currentBiome !== 'rainforest') return;
+  jungleAir.forEach(b=>{
+    const x = Math.round(b.x), y = Math.round(b.y);
+    if(b.type === 'butterfly'){
+      const w = 2 + Math.round(Math.abs(Math.sin(now*0.02 + b.seed))*5);       // wings flap open and shut
+      const by = y + Math.round(Math.sin(now*0.006 + b.seed)*3);              // and it bobs as it flutters
+      ctx.fillStyle = b.col[0];
+      ctx.fillRect(x-w, by-3, w, 5);
+      ctx.fillRect(x, by-3, w, 5);
+      ctx.fillStyle = b.col[1];
+      ctx.fillRect(x-w, by-3, Math.min(w,2), 2);
+      ctx.fillRect(x+w-Math.min(w,2), by-3, Math.min(w,2), 2);
+      ctx.fillRect(x-1, by-3, 2, 7);
+    } else if(b.type === 'dragonfly'){
+      drawDragonfly(b.x, b.y, b.seed, now);
+    } else {                                                                    // bat
+      const flap = Math.sin(now*0.03 + b.seed);
+      const up = Math.round(flap*4);
+      ctx.fillStyle = '#4a3d56';
+      ctx.fillRect(x-2, y-2, 4, 5);                                             // body
+      ctx.fillRect(x-2, y-4, 1, 2); ctx.fillRect(x+1, y-4, 1, 2);               // ears
+      ctx.fillStyle = '#3a2f46';
+      ctx.fillRect(x-11, y-2-up, 9, 2);                                         // wings
+      ctx.fillRect(x+2, y-2-up, 9, 2);
+      ctx.fillRect(x-14, y-up, 4, 2); ctx.fillRect(x+10, y-up, 4, 2);
+      ctx.fillStyle = '#e04a4a';
+      ctx.fillRect(x-1, y-2, 1, 1); ctx.fillRect(x+1, y-2, 1, 1);               // eyes
+    }
+  });
+}
+
+function drawToad(g){
+  ctx.save();
+  ctx.translate(Math.round(g.x), Math.round(g.y));
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.fillRect(-7, -1, 14, 2);                                // shadow stays on the ground while it jumps
+  ctx.translate(0, -Math.round(g.z));
+  ctx.scale(g.dir, 1);
+  ctx.fillStyle = '#7a7a3a'; ctx.fillRect(-7,-9,13,8);        // body
+  ctx.fillStyle = '#8f9448'; ctx.fillRect(-5,-8,9,3);
+  ctx.fillStyle = '#c9c07a'; ctx.fillRect(-5,-3,9,2);         // pale belly
+  ctx.fillStyle = '#7a7a3a'; ctx.fillRect(3,-10,5,6);         // head
+  ctx.fillStyle = '#e8c93a'; ctx.fillRect(4,-12,3,3);         // eye
+  ctx.fillStyle = '#1a1208'; ctx.fillRect(5,-11,1,1);
+  ctx.fillStyle = '#55552a'; ctx.fillRect(-4,-8,2,2); ctx.fillRect(0,-7,2,2);   // warts
+  ctx.fillStyle = '#6a6a30';
+  if(g.z > 1) ctx.fillRect(-11,-4,5,2); else ctx.fillRect(-8,-3,4,3);           // back leg stretches in the air
+  ctx.fillRect(3,-3,3,3);
+  ctx.restore();
+}
+
+function drawLizard(g, now){
+  ctx.save();
+  ctx.translate(Math.round(g.x), Math.round(g.y));
+  ctx.scale(g.dir, 1);
+  const bob = (g.state === 'pause' && Math.sin(now*0.008 + g.seed) > 0.7) ? -1 : 0;   // head-bobs while resting
+  ctx.fillStyle = '#4a8a30'; ctx.fillRect(-12,-4,6,2); ctx.fillRect(-16,-3,4,1);         // tail
+  ctx.fillStyle = '#5aa03a'; ctx.fillRect(-6,-5,10,4);                                    // body
+  ctx.fillStyle = '#3a6a24'; ctx.fillRect(-5,-5,9,1);                                     // back stripe
+  ctx.fillStyle = '#6ab84a'; ctx.fillRect(4,-6+bob,5,4);                                  // head
+  ctx.fillStyle = '#1a1208'; ctx.fillRect(7,-5+bob,1,1);
+  ctx.fillStyle = '#4a8a30';
+  const step = g.state === 'run' ? Math.floor(now/90 + g.seed)%2 : 0;                     // legs scurry while running
+  ctx.fillRect(-3+step*2,-1,2,2); ctx.fillRect(2-step*2,-1,2,2);
+  ctx.restore();
+}
+
+function drawSnake(g, now){
+  const n = g.trail.length;
+  for(let i=0;i<n;i++){
+    const pt = g.trail[i];
+    const sz = 3 + Math.floor(i/n*3);
+    ctx.fillStyle = (i%5 < 3) ? g.col[0] : g.col[1];
+    ctx.fillRect(Math.round(pt.x - sz/2), Math.round(pt.y - sz/2), sz, sz);
+  }
+  const hx = Math.round(g.x), hy = Math.round(g.y);
+  ctx.fillStyle = g.col[0];
+  ctx.fillRect(hx - 3, hy - 3, 7, 6);                                      // head
+  ctx.fillStyle = '#1a1208';
+  ctx.fillRect(hx + g.dir*1 - 1, hy - 2, 1, 1);                            // eye
+  if(Math.floor(now/260 + g.seed)%3 === 0){
+    ctx.fillStyle = '#d93a3a';
+    ctx.fillRect(g.dir>0 ? hx+4 : hx-7, hy, 3, 1);                         // flicking tongue
+  }
+}
+
+function drawJungleGround(now){
+  if(currentBiome !== 'rainforest') return;
+  jungleGround.slice().sort((a,b)=> a.y-b.y).forEach(g=>{          // nearer (lower) creatures drawn last
+    if(g.type === 'toad') drawToad(g);
+    else if(g.type === 'lizard') drawLizard(g, now);
+    else drawSnake(g, now);
+  });
+}
+
+/* ============================== BIOME AMBIENCE ============================== */
+// Decorative animals (the rainforest and the coast have their own wildlife): rabbits and hares in the
+// Field and jumping fish in the River. Never clickable, never logged, no effect on spawning. They walk on the ground in front of anything
+// standing on the line (trees, posts, acacias) and BEHIND anything below the line (flowers, stones, cacti).
+let ambience = [];
+let ambienceBiome = null;
+let ambienceTimer = 1500;
+let ambD = 0;     // how dark it is, so the animals darken at night with the rest of the scene
+const AMBIENCE_CFG = {
+  field:     { max:6, gap:[2500,6000],  start:3 },
+  river:     { max:3, gap:[2500,6000],  start:2 }
+};
+const RABBIT_COATS = [['#a89070','#8a7458'], ['#8a8a8a','#6a6a6a'], ['#c9a878','#a88858'], ['#6a5a4a','#4a3e32']];
+const HARE_COATS   = [['#b08a5a','#8a6a40'], ['#a8957a','#86745c']];
+function C(hex){ return ambD > 0.02 ? lerpColor(hex, '#10182a', Math.min(0.6, ambD*0.6)) : hex; }
+function makeR(s){ return (x,y,w,h)=> ctx.fillRect(Math.round(x*s), Math.round(y*s), Math.max(1, Math.round(w*s)), Math.max(1, Math.round(h*s))); }
+const pickFrom = arr => arr[Math.floor(Math.random()*arr.length)];
+
+function spawnAmbience(type, onscreen){
+  const dir = Math.random()<0.5 ? 1 : -1;
+  const baseY = H*0.80 + 16 + Math.random()*H*0.09;
+  const x0 = onscreen ? W*(0.12 + Math.random()*0.76) : (dir>0 ? -80 : W+80);
+  const a = {
+    type, dir, x:x0, y:baseY, seed:Math.random()*1000, age:0, z:0, scale:1, walkPhase:0, hopsLeft:0,
+    state: 'pause',
+    t: 300 + Math.random()*900,
+    nextJump: 2000 + Math.random()*3000, jt: 999, dead:false, leaving:false
+  };
+  if(type === 'fish'){
+    a.x0 = W*(0.1 + Math.random()*0.8);
+    a.x = a.x0;
+    a.y = H*0.80 + 40 + Math.random()*(H*0.20 - 70);          // where it leaves the water
+    a.dx = (30 + Math.random()*60)*dir;
+    a.dur = 650 + Math.random()*250; a.h = 36 + Math.random()*34;
+    a.state = 'jump'; a.jt = 0; a.rt = 0; a.fy = a.y; a.fp = 0;
+  } else if(type === 'rabbit'){ [a.fur, a.furDark] = pickFrom(RABBIT_COATS);
+  } else if(type === 'hare'){   [a.fur, a.furDark] = pickFrom(HARE_COATS);
+  }
+  ambience.push(a);
+  return a;
+}
+function spawnAmbienceGroup(biome, onscreen, night){
+  const r = Math.random();
+  let type;
+  if(biome === 'field') type = r < 0.55 ? 'rabbit' : 'hare';
+  else                  type = 'fish';                          // river
+  spawnAmbience(type, onscreen);
+}
+
+function beginHop(a){
+  const hare = a.type === 'hare';
+  a.hopT = 0;
+  a.hopDur  = hare ? 280 + Math.random()*60 : 230 + Math.random()*50;
+  a.hopDist = hare ? 70 + Math.random()*40  : 26 + Math.random()*16;
+  a.hopH    = hare ? 16 + Math.random()*8   : 8 + Math.random()*5;
+  a.hx0 = a.x;
+}
+
+function stepAmbience(dt, cycle){
+  if(!AMBIENCE_CFG[currentBiome]){ ambience.length = 0; ambienceBiome = null; return; }
+  const cfg = AMBIENCE_CFG[currentBiome];
+  const night = cycle.darkness > 0.5;
+  ambD = cycle.darkness;
+  if(ambienceBiome !== currentBiome){                            // just arrived: start with a few already out
+    ambience.length = 0;
+    ambienceBiome = currentBiome;
+    ambienceTimer = 1500;
+    for(let i=0;i<cfg.start;i++) spawnAmbienceGroup(currentBiome, true, night);
+  }
+
+  ambience.forEach(a=>{
+    a.age += dt;
+    if(a.age > 85000 && !a.leaving){ a.leaving = true; a.dir = a.x < W/2 ? -1 : 1; }
+    if(a.type === 'fish'){
+      if(a.state === 'jump'){
+        a.jt += dt;
+        const p = Math.min(1, a.jt/a.dur);
+        a.x = a.x0 + a.dx*p;
+        a.fy = a.y - Math.sin(p*Math.PI)*a.h;
+        a.fp = p;
+        if(p >= 1){ a.state = 'ripple'; a.rt = 0; }
+      } else {
+        a.rt += dt;
+        if(a.rt > 600) a.dead = true;
+      }
+      return;
+    }
+    if(a.type === 'rabbit' || a.type === 'hare'){
+      const hare = a.type === 'hare';
+      if(a.state === 'pause'){
+        a.t -= dt;
+        if(a.t <= 0){ a.state = 'hop'; a.hopsLeft = hare ? 3 + Math.floor(Math.random()*4) : 2 + Math.floor(Math.random()*3); beginHop(a); }
+      } else {
+        a.hopT += dt;
+        const p = Math.min(1, a.hopT/a.hopDur);
+        a.x = a.hx0 + a.dir*a.hopDist*p;
+        a.z = Math.sin(p*Math.PI)*a.hopH;
+        if(p >= 1){
+          a.z = 0; a.hopsLeft--;
+          if(a.hopsLeft > 0) beginHop(a);
+          else { a.state = 'pause'; a.t = hare ? 300 + Math.random()*900 : 500 + Math.random()*1400; if(!a.leaving && Math.random() < 0.1) a.dir *= -1; }
+        }
+      }
+    }
+  });
+  ambience.forEach(a=>{ if(a.type !== 'fish' && (a.x < -110 || a.x > W+110)) a.dead = true; });
+  ambience = ambience.filter(a=> !a.dead);
+
+  ambienceTimer -= dt;
+  if(ambienceTimer <= 0){
+    ambienceTimer = cfg.gap[0] + Math.random()*(cfg.gap[1]-cfg.gap[0]);
+    if(ambience.length < cfg.max) spawnAmbienceGroup(currentBiome, false, night);
+  }
+}
+
+function drawRabbit(a){
+  ctx.save();
+  ctx.translate(Math.round(a.x), Math.round(a.y));
+  ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.fillRect(-8, -1, 16, 2);
+  ctx.translate(0, -Math.round(a.z));
+  ctx.scale(a.dir, 1);
+  const fur = C(a.fur), dark = C(a.furDark), white = C('#f2f2ea'), pink = C('#e0a0a0');
+  ctx.fillStyle = fur;  ctx.fillRect(-7,-8,11,6); ctx.fillRect(3,-11,6,6);              // body, head
+  ctx.fillStyle = dark; ctx.fillRect(-8,-9,6,7);                                        // haunch
+  ctx.fillStyle = fur;  ctx.fillRect(4,-18,2,7); ctx.fillRect(7,-17,2,6);               // ears
+  ctx.fillStyle = pink; ctx.fillRect(5,-17,1,5);
+  ctx.fillStyle = white; ctx.fillRect(-10,-8,3,3);                                      // tail
+  ctx.fillStyle = C('#1a1208'); ctx.fillRect(7,-9,1,1);
+  ctx.fillStyle = pink; ctx.fillRect(9,-8,1,1);
+  ctx.fillStyle = dark;
+  if(a.z > 1) ctx.fillRect(-12,-4,6,2); else ctx.fillRect(-6,-2,6,2);                   // back legs stretch out mid-hop
+  ctx.fillRect(2,-2,3,2);
+  ctx.restore();
+}
+function drawHare(a){
+  ctx.save();
+  ctx.translate(Math.round(a.x), Math.round(a.y));
+  ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.fillRect(-12, -1, 24, 2);
+  ctx.translate(0, -Math.round(a.z));
+  ctx.scale(a.dir, 1);
+  const fur = C(a.fur), dark = C(a.furDark), white = C('#f2f2ea'), black = C('#1c1a18');
+  ctx.fillStyle = fur;  ctx.fillRect(-10,-12,16,8); ctx.fillRect(5,-16,7,6);
+  ctx.fillStyle = dark; ctx.fillRect(-12,-13,8,10);
+  ctx.fillStyle = fur;  ctx.fillRect(6,-27,2,11); ctx.fillRect(9,-26,2,10);             // long ears
+  ctx.fillStyle = black; ctx.fillRect(6,-27,2,2); ctx.fillRect(9,-26,2,2);              // black ear tips
+  ctx.fillStyle = white; ctx.fillRect(-6,-5,10,2);                                      // belly
+  ctx.fillStyle = black; ctx.fillRect(-14,-12,3,3);                                     // tail
+  ctx.fillRect(10,-14,1,1);
+  ctx.fillStyle = C('#e0a0a0'); ctx.fillRect(12,-13,1,1);
+  ctx.fillStyle = dark;
+  if(a.z > 2) ctx.fillRect(-16,-6,8,3); else ctx.fillRect(-10,-4,7,4);                  // long legs, stretched when leaping
+  ctx.fillRect(4,-7,3,7);
+  ctx.restore();
+}
+function drawFish(a){
+  const x0 = Math.round(a.x0), ly = Math.round(a.y);
+  const splash = (px,py)=>{ ctx.fillStyle = 'rgba(235,245,255,0.9)'; ctx.fillRect(px-5,py-2,2,2); ctx.fillRect(px+4,py-2,2,2); ctx.fillRect(px-1,py-5,2,3); };
+  if(a.state === 'jump'){
+    if(a.fp < 0.25) splash(x0, ly);                                                      // leaving the water
+    if(a.fp > 0.8) splash(Math.round(a.x0 + a.dx), ly);                                  // about to land
+    const dyd = -Math.PI*a.h*Math.cos(a.fp*Math.PI);                                     // slope of the arc, so the fish tilts along it
+    ctx.save();
+    ctx.translate(Math.round(a.x), Math.round(a.fy));
+    ctx.scale(a.dx >= 0 ? 1 : -1, 1);
+    ctx.rotate(Math.atan2(dyd, Math.abs(a.dx)));
+    ctx.fillStyle = C('#6a8aa0'); ctx.fillRect(-5,-3,8,2);
+    ctx.fillStyle = C('#9ab8c8'); ctx.fillRect(-6,-1,10,3);
+    ctx.fillStyle = C('#e0f0f0'); ctx.fillRect(-4,2,7,1);
+    ctx.fillStyle = C('#7a9ab0'); ctx.fillRect(-9,-4,3,7);
+    ctx.fillStyle = C('#1a1208'); ctx.fillRect(2,-2,1,1);
+    ctx.restore();
+  } else {
+    const lx = Math.round(a.x0 + a.dx), w = Math.round(6 + a.rt/600*22);                // ripples spread out where it landed
+    ctx.fillStyle = `rgba(235,245,255,${0.6*(1 - a.rt/600)})`;
+    ctx.fillRect(lx - w/2, ly, w, 1);
+    ctx.fillRect(lx - w/2 + 3, ly + 2, w - 6, 1);
+  }
+}
+
+function drawAmbience(now){
+  if(!AMBIENCE_CFG[currentBiome] || ambienceBiome !== currentBiome) return;
+  ambience.slice().sort((a,b)=> (a.type==='fish' ? a.y : a.y) - (b.type==='fish' ? b.y : b.y)).forEach(a=>{   // nearer (lower) animals last
+    if(a.type === 'rabbit') drawRabbit(a);
+    else if(a.type === 'hare') drawHare(a);
+    else if(a.type === 'fish') drawFish(a);
+  });
+}
+
+/* ============================== CRITTERS (occasional biome creatures) ============================== */
+// Purely decorative one-off visitors — never clickable, never logged, never affect any count.
+let critters = [];
+let critterTimer = 4000;
+
+const CRITTER_CONFIG = {
+  dragonfly: { biome:'river',  dayOnly:true,  speed:0.16 },
+  bee:       { biome:'forest', dayOnly:true,  speed:0.07 }
+};
+const CRITTER_BY_BIOME = { forest:'bee', river:'dragonfly' };
+
+function buildTimeline(waypoints, speed){
+  let t = 0;
+  const timeline = [{ t:0, x:waypoints[0].x, y:waypoints[0].y }];
+  for(let i=1;i<waypoints.length;i++){
+    const prev = waypoints[i-1], cur = waypoints[i];
+    const dist = Math.hypot(cur.x-prev.x, cur.y-prev.y);
+    t += dist/speed;
+    timeline.push({ t, x:cur.x, y:cur.y });
+    if(cur.hold){ t += cur.hold; timeline.push({ t, x:cur.x, y:cur.y }); }
+  }
+  return { timeline, totalT: t };
+}
+
+function timelinePos(inst, now){
+  const elapsed = now - inst.spawnAt;
+  const tl = inst.timeline;
+  if(elapsed >= inst.totalT) return null;
+  let seg = 0;
+  while(seg < tl.length-1 && tl[seg+1].t < elapsed) seg++;
+  const a = tl[seg], b = tl[Math.min(seg+1, tl.length-1)];
+  const span = Math.max(1, b.t-a.t);
+  const p = Math.min(1, Math.max(0, (elapsed-a.t)/span));
+  return { x: a.x+(b.x-a.x)*p, y: a.y+(b.y-a.y)*p };
+}
+
+function spawnCritter(type){
+  const cfg = CRITTER_CONFIG[type];
+  const fromLeft = Math.random()<0.5;
+  const startX = fromLeft ? -30 : W+30;
+  const exitLeft = Math.random()<0.5;
+  const endX = exitLeft ? -30 : W+30;
+  let waypoints;
+
+  if(type === 'dragonfly'){
+    const y1 = H*0.62 + Math.random()*H*0.16;
+    const midX = W*0.5 + (Math.random()-0.5)*W*0.3;
+    const midY = H*0.60 + Math.random()*H*0.18;
+    const y2 = H*0.62 + Math.random()*H*0.16;
+    waypoints = [{x:startX,y:y1,hold:0},{x:midX,y:midY,hold:0},{x:endX,y:y2,hold:0}];
+  } else { // bee
+    const spot = FOREST_FLOWER_SPOTS[Math.floor(Math.random()*FOREST_FLOWER_SPOTS.length)];
+    const fx = spot.xPct*W, fy = spot.yPct*H - 14;
+    const startY = H*0.55 + Math.random()*H*0.2;
+    const endY = H*0.55 + Math.random()*H*0.2;
+    waypoints = [{x:startX,y:startY,hold:0},{x:fx,y:fy,hold:0},{x:fx,y:fy,hold:2500+Math.random()*2500},{x:endX,y:endY,hold:0}];
+  }
+
+  const { timeline, totalT } = buildTimeline(waypoints, cfg.speed);
+  critters.push({
+    type, spawnAt: gameClock, timeline, totalT,
+    seed: Math.random()*1000
+  });
+}
+
+function maybeSpawnCritter(cycle){
+  const type = CRITTER_BY_BIOME[currentBiome];
+  if(!type) return;
+  const cfg = CRITTER_CONFIG[type];
+  if(cfg.dayOnly && cycle.darkness > 0.5) return;
+  if(critters.length >= 2) return;
+  if(Math.random() > 0.5) return; // not guaranteed every timer tick
+  spawnCritter(type);
+}
+
+function drawDragonfly(x,y,seed,elapsed){
+  const flap = Math.sin(elapsed*0.02 + seed);
+  ctx.save();
+  ctx.translate(x,y);
+  ctx.fillStyle = '#2f9a92';
+  ctx.fillRect(-1,-6,2,12);
+  ctx.fillStyle = '#e8d84a';
+  ctx.fillRect(-1,-6,2,2);
+  ctx.globalAlpha = 0.55 + 0.3*Math.abs(flap);
+  ctx.fillStyle = '#cfeee8';
+  ctx.fillRect(-9,-2,8,3);
+  ctx.fillRect(1,-2,8,3);
+  ctx.restore();
+}
+
+function drawBee(x,y,seed,elapsed){
+  const flap = Math.sin(elapsed*0.05 + seed);
+  ctx.save();
+  ctx.translate(x,y);
+  ctx.globalAlpha = 0.5 + 0.3*Math.abs(flap);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(-2,-6,4,3);
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = '#1c1a18';
+  ctx.fillRect(-3,-2,6,4);
+  ctx.fillStyle = '#e8c93a';
+  ctx.fillRect(-3,-2,2,4);
+  ctx.fillRect(1,-2,2,4);
+  ctx.restore();
+}
+
+function drawCritter(inst, pos, now){
+  const elapsed = now - inst.spawnAt;
+  if(inst.type === 'dragonfly') drawDragonfly(pos.x, pos.y, inst.seed, elapsed);
+  else if(inst.type === 'bee') drawBee(pos.x, pos.y, inst.seed, elapsed);
+}
+
+function loop(nowReal){
+  requestAnimationFrame(loop);
+
+  const dt = Math.min(100, nowReal - lastRealTime);
+  lastRealTime = nowReal;
+  sampleMicLevel();
+
+  if(!started) return;
+  if(!paused) gameClock += dt;
+
+  const now = gameClock;
+  const cycle = getCycleState(now);
+  drawScene(now, cycle);
+
+  if(!paused){
+    // spawn management — the once-a-second (or faster/slower, by difficulty) dice roll
+    tickTimer -= dt;
+    if(tickTimer <= 0){
+      tickTimer = currentTickInterval();
+      const loudEnough = settings.volumeMode && currentMicLevel > VOLUME_THRESHOLD;
+      if(!loudEnough && adminSettings.spawning && flying.filter(b=>!b.summoned).length < currentMaxConcurrent()){
+        const species = rollSpeciesForTick(cycle.darkness > 0.5 ? 'night' : 'day');
+        if(species){
+          const flockReady = gameClock - lastFlockAt >= FLOCK_COOLDOWN || gameClock < lastFlockAt;   // (gameClock restarts with each new game)
+          if(species.flock && adminSettings.flocks && flockReady && Math.random() < FLOCK_CHANCE){
+            spawnFlock(species);
+            lastFlockAt = gameClock;
+          }
+          else spawnBirdInstance(species);
+        }
+      }
+    }
+
+    // active mode: fall asleep if there's no click for 10 seconds
+    if(settings.activeMode){
+      const sinceClick = gameClock - lastActiveAt;
+      if(sinceClick >= 10000){
+        fallAsleep();
+        return;
+      } else if(sinceClick >= 5000){
+        showActiveWarning(Math.ceil((10000-sinceClick)/1000));
+      } else {
+        hideActiveWarning();
+      }
+    } else {
+      hideActiveWarning();
+    }
+
+    stepAmbientBugs(cycle);
+    stepJungleLife(dt, cycle);
+    stepCoastLife(dt, cycle);
+    stepAmbience(dt, cycle);
+
+    critterTimer -= dt;
+    if(critterTimer <= 0){
+      critterTimer = 8000 + Math.random()*10000;
+      maybeSpawnCritter(cycle);
+    }
+  }
+
+  // draw + cull birds
+  flying = flying.filter(inst=>{
+    const pos = getBirdPos(inst, now);
+    if(!pos) return false;
+    if(!birdDrawnBehindFront(inst)) drawBirdInst(inst, pos, now);   // the others were drawn in drawScene
+    if(inst.splash) drawSplash(inst, now);
+    return true;
+  });
+
+  drawAmbientBugs();
+  drawJungleAir(now);
+
+  // draw + cull critters (dragonflies, bees, bunnies)
+  critters = critters.filter(inst=>{
+    const pos = timelinePos(inst, now);
+    if(!pos) return false;
+    drawCritter(inst, pos, now);
+    return true;
+  });
+
+  drawWeather(now);
+
+  // capture a photo now, while the canvas holds the clean scene (before the lens chrome is drawn)
+  if(pendingPhotoCapture){
+    pendingPhotoCapture = false;
+    if(binocOn) capturePhotoFromCanvas();
+  }
+
+  drawBinoculars();
+
+  // HUD day/night label
+  let label = 'DAY';
+  if(cycle.stage==='dusk') label='DUSK';
+  else if(cycle.stage==='night') label='NIGHT';
+  else if(cycle.stage==='dawn') label='DAWN';
+  dayBadge.textContent = label;
+}
+requestAnimationFrame(loop);
+
+const bgMusic = document.getElementById('bgMusic');
+bgMusic.loop = true;
+bgMusic.volume = 0.5;
+
+function playMusicSafely(){
+  try{
+    const p = bgMusic.play();
+    if(p && typeof p.catch === 'function') p.catch(()=>{}); // ignore autoplay-policy rejections
+  }catch(e){}
+}
+
+document.getElementById('startBtn').addEventListener('click', ()=>{
+  document.getElementById('titleScreen').style.display = 'none';
+  started = true;
+  gameClock = 0;
+  cycleStart = -5000; // ease into a bit of daylight already elapsed
+  lastActiveAt = 0;
+  applyAdminUI();
+  if(settings.musicEnabled){
+    bgMusic.currentTime = 0;
+    playMusicSafely();
+  }
+});
+
+/* ============================== CREATIVE MODE ============================== */
+// A temporary sandbox game: it starts blank, saves nothing, and lives in memory only, so closing or
+// reloading the tab ends it and the player's own saved progress is never touched.
+let adminMode = false;
+const hintEl       = document.getElementById('hint');
+const summonBtn    = document.getElementById('summonBtn');
+const summonPanel  = document.getElementById('summonPanel');
+const summonSearch = document.getElementById('summonSearch');
+const summonList   = document.getElementById('summonList');
+
+function startCreativeMode(){
+  adminMode = true;
+  discovered = new Set();   // blank, temporary save (nothing here is ever written to storage)
+  photos = [];
+  refreshCounts();
+  refreshPhotoCount();
+  document.getElementById('startBtn').click();   // start the game as normal
+}
+document.getElementById('adminBtn').addEventListener('click', startCreativeMode);
+
+const adminSettings = { spawning:true, saving:false, flocks:true };   // reset every time you start or leave Creative Mode
+const adminBar  = document.getElementById('adminBar');
+const timeBtn   = document.getElementById('timeBtn');
+const timePanel = document.getElementById('timePanel');
+const adminRows = {
+  spawn: document.querySelector('.settingRow[data-setting="adminSpawn"]'),
+  save:  document.querySelector('.settingRow[data-setting="adminSave"]'),
+  flock: document.querySelector('.settingRow[data-setting="adminFlock"]'),
+  rain:  document.querySelector('.settingRow[data-setting="adminRain"]')
+};
+function refreshAdminSettingsUI(){
+  adminRows.spawn.classList.toggle('checked', adminSettings.spawning);
+  adminRows.save.classList.toggle('checked', adminSettings.saving);
+  adminRows.flock.classList.toggle('checked', adminSettings.flocks);
+  adminRows.rain.classList.toggle('checked', adminRain !== null ? adminRain : rainTarget === 1);
+}
+adminRows.spawn.addEventListener('click', ()=>{ adminSettings.spawning = !adminSettings.spawning; refreshAdminSettingsUI(); });
+adminRows.save.addEventListener('click',  ()=>{ adminSettings.saving   = !adminSettings.saving;   refreshAdminSettingsUI(); });
+adminRows.flock.addEventListener('click', ()=>{ adminSettings.flocks   = !adminSettings.flocks;   refreshAdminSettingsUI(); });
+adminRows.rain.addEventListener('click',  ()=>{ adminRain = !(adminRain !== null ? adminRain : rainTarget === 1); refreshAdminSettingsUI(); });
+
+// ---- time of day (admin) ----
+const TIME_OPTIONS = [
+  ['day',   '☀️ DAY'],
+  ['dusk',  '🌇 DUSK'],
+  ['night', '🌙 NIGHT'],
+  ['dawn',  '🌅 DAWN'],
+  ['auto',  '⏱ AUTO (normal cycle)']
+];
+const TIME_PRESETS = {   // ms into the cycle; these decide whether day or night birds spawn
+  day:   DAY_HOLD*0.5,
+  dusk:  DAY_HOLD + DUSK*0.4,
+  night: DAY_HOLD + DUSK + NIGHT_HOLD*0.5,
+  dawn:  DAY_HOLD + DUSK + NIGHT_HOLD + DAWN*0.6
+};
+let adminTimeMode = 'auto';
+function setAdminTime(mode){
+  if(mode === 'auto'){
+    if(adminFreezeT !== null){ cycleStart = gameClock - adminFreezeT; adminFreezeT = null; }  // carry on from here
+  } else {
+    adminFreezeT = TIME_PRESETS[mode];   // hold the chosen time until AUTO is picked
+  }
+  adminTimeMode = mode;
+  refreshTimePanel();
+}
+function refreshTimePanel(){
+  timePanel.innerHTML = '';
+  TIME_OPTIONS.forEach(([key,label])=>{
+    const row = document.createElement('div');
+    row.className = 'timeRow' + (key === adminTimeMode ? ' active' : '');
+    row.textContent = label;
+    row.addEventListener('click', ()=>{ setAdminTime(key); closeTimePanel(); });
+    timePanel.appendChild(row);
+  });
+}
+function closeTimePanel(){ timePanel.classList.remove('open'); }
+timeBtn.addEventListener('click', ()=>{
+  if(timePanel.classList.contains('open')){ closeTimePanel(); return; }
+  closeSummonPanel();
+  refreshTimePanel();
+  timePanel.classList.add('open');
+});
+
+function applyAdminUI(){
+  hintEl.style.display = adminMode ? 'none' : '';        // the summon / time buttons take the instructions' place
+  adminBar.style.display = adminMode ? 'flex' : 'none';
+  document.querySelectorAll('.adminRow').forEach(r=>{ r.style.display = adminMode ? '' : 'none'; });
+  refreshAdminSettingsUI();
+  if(!adminMode){ closeSummonPanel(); closeTimePanel(); }
+}
+function leaveAdminMode(){
+  adminMode = false;
+  adminSettings.spawning = true;
+  adminSettings.saving = false;
+  adminSettings.flocks = true;
+  adminRain = null;           // back to natural rain, and a fresh weather schedule for the next game
+  weatherLastNow = null;
+  adminFreezeT = null;
+  adminTimeMode = 'auto';
+  applyAdminUI();
+}
+function closeSummonPanel(){ summonPanel.classList.remove('open'); }
+function buildSummonList(filter){
+  summonList.innerHTML = '';
+  const q = (filter||'').trim().toLowerCase();
+  BIRDS.filter(b=> !q || b.name.toLowerCase().includes(q) || b.tier.includes(q) || b.biomes.some(x=>x.includes(q))).forEach(b=>{
+    const row = document.createElement('div');
+    row.className = 'summonRow';
+    const c = document.createElement('canvas');
+    c.width = 40; c.height = 40;
+    const g = c.getContext('2d');
+    g.imageSmoothingEnabled = false;
+    g.drawImage(getBirdIcon(b), 0, 0, 40, 40);
+    const name = document.createElement('span');
+    name.className = 'summonName';
+    name.textContent = b.name;
+    const tier = document.createElement('span');
+    tier.className = 'tier ' + b.tier;
+    tier.textContent = b.tier.toUpperCase();
+    row.append(c, name, tier);
+    row.addEventListener('click', ()=> summonBird(b));
+    summonList.appendChild(row);
+  });
+}
+function summonBird(b){
+  if(!started) return;
+  // enters from the far left or far right and behaves like any other bird (flocking birds can arrive as a group too)
+  if(b.flock && adminSettings.flocks && Math.random() < FLOCK_CHANCE) spawnFlock(b, true);
+  else spawnBirdInstance(b, true);
+}
+summonBtn.addEventListener('click', ()=>{
+  if(summonPanel.classList.contains('open')){ closeSummonPanel(); return; }
+  closeTimePanel();
+  summonSearch.value = '';
+  buildSummonList('');
+  summonPanel.classList.add('open');
+});
+summonSearch.addEventListener('input', ()=> buildSummonList(summonSearch.value));
+summonSearch.addEventListener('keydown', (e)=>{ if(e.key === 'Escape') closeSummonPanel(); });
+
+// Reloads the player's own saved birds and photos from storage.
+function loadPlayerData(){
+  discovered = new Set();
+  try{ JSON.parse(localStorage.getItem(STORAGE_KEY)||'[]').forEach(id=>discovered.add(id)); }catch(e){}
+  photos = [];
+  try{ photos = JSON.parse(localStorage.getItem(PHOTO_KEY) || '[]'); }catch(e){ photos = []; }
+  refreshCounts();
+  refreshPhotoCount();
+}
+
+function performReset(){
+  if(adminMode){
+    // admin data only ever lived in memory: drop it and bring back the player's own saved data untouched
+    loadPlayerData();
+  } else {
+    // wipe discovered species + saved progress
+    discovered.clear();
+    try{ localStorage.removeItem(STORAGE_KEY); }catch(e){}
+    refreshCounts();
+
+    // wipe saved photos
+    photos = [];
+    try{ localStorage.removeItem(PHOTO_KEY); }catch(e){}
+    refreshPhotoCount();
+  }
+  closePhotoAlbum();
+
+  // clear any birds currently on screen and stop spawning until restarted
+  flying = [];
+  tickTimer = 0;
+  ambientBugs = [];
+  ambientType = null;
+  critters = [];
+  critterTimer = 4000;
+
+  // close the journal if it's open
+  closeJournal();
+  activeTab = 'all';
+  document.querySelectorAll('.tabBtn').forEach(b=>b.classList.remove('active'));
+  document.querySelector('.tabBtn[data-tier="all"]').classList.add('active');
+
+  // turn off binoculars
+  binocOn = false;
+  binocBtn.classList.remove('active');
+  document.getElementById('world').classList.remove('binocMode');
+
+  // back to the forest biome
+  switchBiome('forest');
+
+  // reset the day/night cycle back to the start of a fresh day
+  lastCycleIndex = -1;
+  gameClock = 0;
+  cycleStart = 0;
+
+  // close settings + unpause if it was open
+  closeSettings();
+
+  leaveAdminMode();
+
+  // stop the game and show the start menu again
+  started = false;
+  document.getElementById('titleScreen').style.display = 'flex';
+  bgMusic.pause();
+  bgMusic.currentTime = 0;
+}
+
+const confirmOverlay = document.getElementById('confirmOverlay');
+document.getElementById('homeBtn').addEventListener('click', ()=>{
+  confirmOverlay.classList.add('open');
+});
+document.getElementById('confirmNo').addEventListener('click', ()=>{
+  confirmOverlay.classList.remove('open');
+});
+document.getElementById('confirmYes').addEventListener('click', ()=>{
+  confirmOverlay.classList.remove('open');
+  performReset();
+});
+confirmOverlay.addEventListener('click', (e)=>{
+  if(e.target===confirmOverlay) confirmOverlay.classList.remove('open');
+});
+
+})();
+</script>
+</body>
+</html>
